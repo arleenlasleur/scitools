@@ -1,0 +1,8 @@
+Draw3DLine
+	C.Draw3DLine(MakeColor(64,64,64), WarpCoords.Origin, Location);
+	C.Draw3DLine(MakeColor(0,255,0), WarpCoords.Origin, WarpCoords.Origin+WarpCoords.XAxis*32.f);
+	C.Draw3DLine(MakeColor(255,0,0), WarpCoords.Origin, WarpCoords.Origin+WarpCoords.YAxis*32.f);
+	C.Draw3DLine(MakeColor(0,0,255), WarpCoords.Origin, WarpCoords.Origin+WarpCoords.ZAxis*32.f);
+		C.Draw3DLine(MakeColor(255,255,64), RelativeOffset, Location);
+				C.Draw3DLine(MakeColor(255,0,255),Location,A.Location);
+native(1751) final function Draw3DLine( Color Col, vector Start, vector End );

@@ -1,0 +1,4 @@
+https://www.moddb.com/mods/csmadisuns-unreal-add-ons-and-extras
+Unreal_Add-On_Collection.7z
+md5:  30daf3ad01b8c0b79273cb8cacb26cf1
+sha1: 8b673f984e0051c129b87d3ad29bc2fd005548e7

@@ -1,0 +1,102 @@
+class toolstub extends weapon;
+var name pnr_last;
+var float next_scan;
+//var byte next_rssi;
+
+function postrender(canvas c){
+   c.font=c.smallfont;
+   c.setpos(10,10);  c.drawtext("about");
+   c.setpos(10,20);  c.drawtext("text");
+   c.setpos(10,30);  c.drawtext("here");
+}
+
+function postbeginplay(){
+}
+
+function playselect(){
+   local playerpawn p;
+   p = playerpawn(owner);
+   if(p == none) return;
+   p.consolecommand("killpawns");
+}
+
+function tick(float f){
+   local playerpawn p;
+   p = playerpawn(owner);
+   if(p == none) return;
+   next_scan -= f;
+   if(next_scan > 0) return;
+   next_scan = 0.1;
+   do_tick_scan(p);
+}
+
+function do_tick_scan(playerpawn p){
+   local pathnode pn,pn_act;
+   local float dist,dist_act;
+   if(p.weapon != self) return;
+   dist_act = 129.0;
+   foreach radiusactors(class'pathnode',pn,128){
+      dist = vsize(p.location - pn.location);
+      if(dist < dist_act){
+         dist_act = dist;
+         pn_act = pn;
+      }
+   }
+   if(pn_act==none && pn!=none) pn_act = pn;
+   if(pn_act==none) return;
+   pnr_last = pn_act.name;
+}
+
+exec function pnrdump(){
+//   local pathnoderssi pd;
+//   log("===============================================================",'PNR');
+//   foreach allactors(class'pathnoderssi',pd) log(pd.targ$": "$pd.rssi,'PNR');
+//   log("===============================================================",'PNR');
+}
+
+function pnr_set(byte rssi){
+//   local pathnode ptx;
+//   local pathnoderssi prx;
+//   ptx = FindPN(pnr_last);
+//   if(ptx == none) return;
+//   if(ptx.event == ''){
+//      prx = spawn(class'PathnodeRSSI',,,ptx.location);
+//      ptx.event = prx.name;
+//      prx.targ = ptx.name;
+//      ptx.bHidden = true;
+//      pnr_now++;
+//   }else
+//      prx = FindPR(ptx.event);
+//   if(prx == none) return;
+//   prx.update(rssi);
+}
+
+//     function fire(float f){   pnr_set(next_rssi);          }
+//exec function aerscrolldown(){ if(next_rssi>0) next_rssi--; }
+//exec function aerscrollup(){   if(next_rssi<6) next_rssi++; }
+
+function altfire(float f){
+   local playerpawn p;
+   local actor atarg;
+   local vector hl, hn, x, y, z;
+   local mover m;
+   p = playerpawn(owner);
+   if(p == none) return;
+   getaxes(p.viewrotation,x,y,z);
+   atarg = trace(hl,hn,p.location + 10000*x,p.location,true);
+   m = mover(atarg);
+   if(m==none) return;
+   m.trigger(p,p.instigator);
+}
+
+function pathnode FindPN(name t){
+//   local pathnode pt;
+//   foreach radiusactors(class'pathnode',pt,128) if(pt.name == t) return pt;
+   return none;
+}
+
+defaultproperties{
+  PickupViewMesh=LodMesh'UnrealShare.AutoMagPickup'
+  InventoryGroup=1
+  PickupAmmoCount=9999
+}

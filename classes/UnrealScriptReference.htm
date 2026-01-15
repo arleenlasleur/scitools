@@ -1,0 +1,2494 @@
+<html>
+
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+<meta name="GENERATOR" content="Microsoft FrontPage 3.0">
+<meta name="Template" content="F:\Office\Office\html.dot">
+<title>UnrealScript Language Reference</title>
+</head>
+
+<body link="#0000ff" vlink="#800080">
+<font size="2">
+
+<h1 align="left"></font>UnrealScript Language Reference<font size="2"></h1>
+</font>
+
+<address>
+  Tim Sweeney<br>
+  Epic MegaGames, Inc.<br>
+  tim@epicgames.com<br>
+  http://www.epicgames.com/ 
+</address>
+
+<p>This document is a trade secret of Epic MegaGames, Inc.</p>
+<b><font face="Arial" size="4">
+
+<p>Introduction</p>
+</font><font face="Arial"><i>
+
+<p>Purpose of this document</p>
+</i></font></b><font size="2">
+
+<p>This is a technical document describing the UnrealScript language. It&#146;s not a
+tutorial, nor does it provide detailed examples of useful UnrealScript code. For examples
+of UnrealScript prior to release of Unreal, the reader is referred to the source code to
+the Unreal scripts, which provides tens of thousands of lines of working UnrealScript code
+which solves many problems such as AI, movement, inventory, and triggers. A good way to
+get started is by printing out the &quot;Actor&quot;, &quot;Object&quot;,
+&quot;Pawn&quot;, &quot;Inventory&quot;, and &quot;Weapon&quot; scripts.</p>
+
+<p>This document assumes that the reader has a working knowledge of C/C++, is familiar
+with object-oriented programming, has played Unreal and has used the UnrealEd editing
+environment.</p>
+</font><font face="Arial"><i><b>
+
+<p>Design goals of UnrealScript</p>
+</b></i></font><font size="2">
+
+<p>UnrealScript was created to provide the development team and the third-party Unreal
+developers with a powerful, built-in programming language that maps naturally onto the
+needs and nuances of game programming.</p>
+
+<p>The major design goals of UnrealScript are: 
+
+<ul>
+  <li>To support the major concepts of time, state, properties, and networking which
+    traditional programming languages don&#146;t address. This greatly simplifies UnrealScript
+    code. The major complication in C/C++ based AI and game logic programming lies in dealing
+    with events that take a certain amount of game time to complete, and with events which are
+    dependent on aspects of the object&#146;s state. In C/C++, this results in spaghetti-code
+    that is hard to write, comprehend, maintain, and debug. UnrealScript includes native
+    support for time, state, and network replication which greatly simplify game programming. </li>
+  <li>To provide Java-style programming simplicity, object-orientation, and compile-time error
+    checking. Much as Java brings a clean programming platform to Web programmers,
+    UnrealScript provides an equally clean, simple, and robust programming language to 3D
+    gaming. The major programming concepts which UnrealScript derives from Java are: a
+    pointerless environment with automatic garbage collection; a simple single-inheretance
+    class graph; strong compile-time type checking; a safe client-side execution
+    &quot;sandbox&quot;; and the familiar look and feel of C/C++/Java code. </li>
+  <li>To enable rich, high level programming in terms of game objects and interactions rather
+    than bits and pixels. Where design tradeoffs had to be made in UnrealScript, I sacrificed
+    execution speed for development simplicity and power. After all, the low-level,
+    performance-critical code in Unreal is written in C/C++ where the performance gain
+    outweighs the added complexity. UnrealScript operates at a level above that, at the object
+    and interaction level, rather than the bits and pixels level.</li>
+</ul>
+
+<p>During the early development of UnrealScript, several major different programming
+paradigms were explored and discarded before arriving at the current incarnation. First, I
+researched using the Sun and Microsoft Java VM&#146;s for Windows as the basis of
+Unreal&#146;s scripting language. It turned out that Java offered no programming benefits
+over C/C++ in the Unreal context, added frustraging restrictions due to the lack of needed
+language features (such as operator overloading), and turned out to be unfathomably slow
+due to both the overhead of the VM task switch and the inefficiencies of the Java garbage
+collector in the case of a large object graph. Second, I based an early implementation of
+UnrealScript on a Visual Basic variant, which worked fine, but was less friendly to
+programmers accustomed to C/C++. The final decision to base UnrealScript on a C++/Java
+variant was based on the desire to map game-specific concepts onto the language definition
+itself, and the need for speed and familiarity. This turned out to be a good decision, as
+it has greatly simplified many aspects of the Unreal codebase.</p>
+</font><font face="Arial"><i><b>
+
+<p>Example program structure</p>
+</b></i></font><font size="2">
+
+<p>This example illustrates a typical, simple UnrealScript class, and it highlights the
+syntax and features of UnrealScript. Note that this code may differ from that which
+appears in the current Unreal source, as this documentation is not synced with the code.</p>
+</font>
+
+<pre><small>//=============================================================================
+// TriggerLight.
+// A lightsource which can be triggered on or off.
+//=============================================================================
+class TriggerLight expands Light
+	package(UnEngine);
+&nbsp;
+//-----------------------------------------------------------------------------
+// Variables.
+&nbsp;
+var() float ChangeTime; // Time light takes to change from on to off.
+var() bool bInitiallyOn; // Whether it's initially on.
+var() bool bDelayFullOn; // Delay then go full-on.
+&nbsp;
+var ELightType InitialType; // Initial type of light.
+var float InitialBrightness; // Initial brightness.
+var float Alpha, Direction;
+var actor Trigger;
+&nbsp;
+//-----------------------------------------------------------------------------
+// Engine functions.
+&nbsp;
+// Called at start of gameplay.
+function BeginPlay()
+{
+	// Remember initial light type and set new one.
+	Disable( 'Tick' );
+	InitialType = LightType;
+	InitialBrightness = LightBrightness;
+	if( bInitiallyOn )
+	{
+		Alpha = 1.0;
+		Direction = 1.0;
+	}
+	else
+	{
+		LightType = LT_None;
+		Alpha = 0.0;
+		Direction = -1.0;
+	}
+}
+&nbsp;
+// Called whenever time passes.
+function Tick( float DeltaTime )
+{
+	LightType = InitialType;
+	Alpha += Direction * DeltaTime / ChangeTime;
+	if( Alpha &gt; 1.0 )
+	{
+		Alpha = 1.0;
+		Disable( 'Tick' );
+		if( Trigger != None )
+			Trigger.ResetTrigger();
+	}
+	else if( Alpha &lt; 0.0 )
+	{
+		Alpha = 0.0;
+		Disable( 'Tick' );
+		LightType = LT_None;
+		if( Trigger != None )
+			Trigger.ResetTrigger();
+	}
+	if( !bDelayFullOn )
+		LightBrightness = Alpha * InitialBrightness;
+	else if( (Direction&gt;0 &amp;&amp; Alpha!=1) || Alpha==0 )
+		LightBrightness = 0;
+	else
+		LightBrightness = InitialBrightness;
+}
+&nbsp;
+//-----------------------------------------------------------------------------
+// Public states.
+&nbsp;
+// Trigger turns the light on.
+state() TriggerTurnsOn
+{
+	function Trigger( actor Other, pawn EventInstigator )
+	{
+		Trigger = None;
+		Direction = 1.0;
+		Enable( 'Tick' );
+	}
+}
+&nbsp;
+// Trigger turns the light off.
+state() TriggerTurnsOff
+{
+	function Trigger( actor Other, pawn EventInstigator )
+	{
+		Trigger = None;
+		Direction = -1.0;
+		Enable( 'Tick' );
+	}
+}
+&nbsp;
+// Trigger toggles the light.
+state() TriggerToggle
+{
+	function Trigger( actor Other, pawn EventInstigator )
+	{
+		log(&quot;Toggle&quot;);
+		Trigger = Other;
+		Direction *= -1;
+		Enable( 'Tick' );
+	}
+}
+&nbsp;
+// Trigger controls the light.
+state() TriggerControl
+{
+	function Trigger( actor Other, pawn EventInstigator )
+	{
+		Trigger = Other;
+		if( bInitiallyOn ) Direction = -1.0;
+		else Direction = 1.0;
+		Enable( 'Tick' );
+	}
+	function UnTrigger( actor Other, pawn EventInstigator )
+	{
+		Trigger = Other;
+		if( bInitiallyOn ) Direction = 1.0;
+		else Direction = -1.0;
+		Enable( 'Tick' );
+	}
+}</small></pre>
+<font size="1">
+
+<p></font><font size="2">The key elements to look at in this script are: 
+
+<ul>
+  <li>The class declaration. Each class &quot;expands&quot; (derives from) one parent class,
+    and each class belongs to a &quot;package&quot;, a collection of objects that are
+    distributed together. All functions and variables belong to a class, and are only
+    accessible through an actor that belongs to that class. There are no system-wide global
+    functions or variables. </li>
+  <li>The variable declarations. UnrealScript supports a very diverse set of variable types
+    including most base C/Java types, object references, structs, and arrays. In addition,
+    variables can be made into editable properties which designers can access in UnrealEd
+    without any programming. </li>
+  <li>The functions. Functions can take a list of parameters, and they optionally return a
+    value. Functions can have local variables. Some functions are called by the Unreal engine
+    itself (such as BeginPlay), and some functions are called from other script code elsewhere
+    (such as Trigger). </li>
+  <li>The code. All of the standard C and Java keywords are supported, like &quot;for&quot;,
+    &quot;while&quot;, &quot;break&quot;, &quot;switch&quot;, &quot;if&quot;, and so on.
+    Braces and semicolons are used in UnrealScript as in C, C++, and Java. </li>
+  <li>Actor and object references. Here you see several cases where a function is called
+    within another object, using an object reference. </li>
+  <li>The &quot;state&quot; keyword. This script defines several &quot;states&quot;, which are
+    groupings of functions, variables, and code which are executed only when the actor is in
+    that state. </li>
+  <li>Note that all keywords, variable names, functions, and object names in UnrealScript are
+    case-insensitive. To UnrealScript, &quot;Demon&quot;, &quot;demON&quot;, and
+    &quot;demon&quot; are the same thing.</li>
+</ul>
+</font><font face="Arial"><i><b>
+
+<p>The Unreal Virtual Machine</p>
+</b></i></font><font size="2">
+
+<p>The Unreal Virtual Machine consists of several components: The server, the client, the
+rendering engine, and the engine support code.</p>
+
+<p>The Unreal server controls all gameplay and interaction between players and actors. In
+a single-player game, both the Unreal client and the Unreal server are run on the same
+machine; in an Internet game, there is a dedicated server running on one machine; all
+players connect to this machine and are clients.</p>
+
+<p>All gameplay takes place inside a &quot;level&quot;, a self-contained environment
+containing geometry and actors. Though UnrealServer may be capable of running more than
+one level simultaneously, each level operates independently, and are shielded from each
+other: actors cannot travel between levels, and actors on one level cannot communicate
+with actors on another level.</p>
+
+<p>Each actor in a map can either be under player control (there can be many players in a
+network game) or under script control. When an actor is under script control, its script
+completely defines how the actor moves and interacts with other actors.</p>
+
+<p>With all of those actors running around, scripts executing, and events occuring in the
+world, you're probably asking how one can understand the flow of execution in an
+UnrealScript. The answer is as follows:</p>
+
+<p>To manage time, Unreal divides each second of gameplay into &quot;Ticks&quot;. A tick
+is the smallest unit of time in which all actors in a level are updated. A tick typically
+takes between 1/100th to 1/10th of a second. The tick time is limited only by CPU power;
+the faster machine, the lower the tick duration is.</p>
+
+<p>Some commands in UnrealScript take zero ticks to execute (i.e. they execute without any
+game-time passing), and others take many ticks. Functions which require game-time to pass
+are called &quot;latent functions&quot;. Some examples of latent functions include
+&quot;Sleep&quot;, &quot;FinishAnim&quot;, and &quot;MoveTo&quot;. Latent functions in
+UnrealScript may only be called from code within a state, not from code within a function.</p>
+
+<p>While an actor is executing a latent function, that actor's state execution doesn't
+continue until the latent function completes. However, other actors, or the VM, may call
+functions within the actor. The net result is that all UnrealScript functions can be
+called at any time, even while latent functions are pending.</p>
+
+<p>In traditional programming terms, UnrealScript acts as if each actor in a level has its
+own &quot;thread&quot; of execution. Internally, Unreal does not use Windows threads,
+because that would be very inefficient (Windows 95 and Windows NT do not handle thousands
+of simultaneous threads efficiently). Instead, UnrealScript simulates threads. This fact
+is transparent to UnrealScript code, but becomes very apparent when you write C++ code
+which interacts with UnrealScript.</p>
+
+<p>All UnrealScripts execute in parallel. If there are 100 monsters walking around in a
+level, all 100 of those monsters' scripts are executing simultaneously and independently.</p>
+</font><font face="Arial"><i><b>
+
+<p>Class overview</p>
+</b></i></font><font size="2">
+
+<p>Before beginning work with UnrealScript, it&#146;s important to understand the
+high-level relationships of objects within Unreal. The architecture of Unreal is a major
+departure from that of most other games: Unreal is purely object-oriented (much like
+COM/ActiveX), in that it has a well-defined object model with support for high-level
+object oriented concepts such as the object graph, serialization, object lifetime, and
+polymorphism. Historically, most games have been designed monolithically, with their major
+functionality hardcoded and unexpandable at the object level, though many games, such as
+Doom and Quake, have proven to be very expandable at the content level. There is a major
+benefit to Unreal&#146;s form of object-orientation: major new functionality and object
+types can be added to Unreal at runtime, and this expansion can take the form of
+subclassing, rather than (for example) by modifying a bunch of existing code. This form of
+extensibility is extremely powerful, as it encourages the Unreal community to create
+Unreal enhancements that all interoperate.</p>
+<b>
+
+<p>Object</b> is the parent class of all objects in Unreal. All of the functions in the
+Object class are accessible everywhere, because everything derives from Object. Object is
+an abstract base class, in that it doesn&#146;t do anything useful. All functionality is
+provided by subclasses, such as Texture (a texture map), TextBuffer (a chunk of text), and
+Class (which describes the class of other objects).</p>
+<b>
+
+<p>Actor</b> (expands Object) is the parent class of all standalone game objects in
+Unreal. The Actor class contains all of the functionality needed for an actor to move
+around, interact with other actors, affect the environment, and do other useful
+game-related things.</p>
+<b>
+
+<p>Pawn</b> (expands Actor) is the parent class of all creatures and players in Unreal
+which are capable of high-level AI and player controls.</p>
+<b>
+
+<p>Class</b> (expands Object) is a special kind of object which describes a class of
+object. This may seem confusing at first: a class is an object, and a class describes
+certain objects. But, the concept is sound, and there are many cases where you will deal
+with Class objects. For example, when you spawn a new actor in UnrealScript, you can
+specify the new actor&#146;s class with a Class object.</p>
+
+<p>With UnrealScript, you can write code for any Object class, but 99% of the time, you
+will be writing code for a class derived from Actor. Most of the useful UnrealScript
+functionality is game-related and deals with actors.</p>
+</font><b><font face="Arial" size="4">
+
+<p>Major elements of UnrealScript</p>
+</font><font face="Arial"><i>
+
+<p>The class declaration</p>
+</i></font></b><font size="2">
+
+<p>Each script corresponds to exactly one class, and the script begins by declaring the
+class, the class&#146;s parent, and any additional information that is relevent to the
+class. The simplest form is:</p>
+</font>
+
+<pre><small>class MyClass expands MyParentClass
+	package(MyPackage);</small></pre>
+<font size="2">
+
+<p>Here I am declaring a new class named &quot;MyClass&quot;, which inherets the
+functionality of &quot;MyParentClass&quot;. Additionally, the class resides in the package
+named &quot;MyPackage&quot;.</p>
+
+<p>Each class inherets all of the variables, functions, and states from its parent class.
+It can then add new variable declarations, add new functions (or override the existing
+functions), add new states (or add functionality to the existing states).</p>
+
+<p>The typical approach to class design in UnrealScript is to make a new class (for
+example a Minotaur monster) which expands an existing class that has most of the
+functionality you need (for example the Pawn class, the base class of all monsters). With
+this approach, you never need to reinvent the wheel &#150; you can simply add the new
+functionality you want to customize, while keeping all of the existing functionality you
+don&#146;t need to customize. This approach is especially powerful for implementing AI in
+Unreal, where the built-in AI system provides a tremendous amount of base functionality
+which you can use as building blocks for your custom creatures.</p>
+
+<p>The class declaration can take several optional specifiers that affect the class:</p>
+<b>
+
+<p>Intrinsic:</b> Says &quot;this class uses behind-the-scenes C++ support&quot;. Unreal
+expects Intrinsic classes to contain a C++ implementation in the DLL corresponding to the
+class&#146;s package. For example, if your package is named &quot;Robots&quot;, Unreal
+looks in the &quot;Robots.dll&quot; for the C++ implementation of the intrinsic class,
+which is generated by the C++ IMPLEMENT_CLASS macro.</p>
+<b>
+
+<p>HideParent:</b> Says &quot;when a user is editing an object of this class in UnrealEd,
+don&#146;t show any of the parent class&#146;s properties in the editor&quot;.</p>
+<b>
+
+<p>Abstract:</b> Declares the class as an &quot;abstract base class&quot;. This prevents
+the user from adding actors of this class to the world in UnrealEd, because the class
+isn&#146;t meaningful on its own. For example, the &quot;Pawn<br>
+base class is abstract, while the &quot;Brute&quot; subclass is not abstract &#150; you
+can place a Brute in the world, but you can&#146;t place a Pawn in the world.</p>
+<b>
+
+<p>Guid:</b> Associates a globally unique identifier (a 128-bit number) with the class.
+This Guid is currently unused, but will be relevent when native COM support is later added
+to Unreal.</p>
+<b>
+
+<p>Transient:</b> Says &quot;objects belonging to this class should never be saved on
+disk&quot;. Only useful in conjunction with certain kinds of intrinsic classes which are
+non-persistent by nature, such as players or windows.</p>
+<b>
+
+<p>ScriptConst:</b> Says &quot;objects of this class must be declared Const in
+UnrealScript&quot;, to prevent them from being changed during gameplay.</p>
+</font><font face="Arial"><i><b>
+
+<p>Variables</p>
+</b></i></font><font size="2">
+
+<p>Here are some examples of instance variable declarations in UnrealScript:</p>
+</font>
+
+<pre><small>var int a; // Declare an integer variable named &quot;A&quot;.
+var byte Table[64]; // Declare an array of 64 bytes named &quot;Table&quot;.
+var string[32] PlayerName; // Declare a max 32-character string.
+var actor Other; // Declare a variable referencing an actor.</small></pre>
+<font size="2">
+
+<p>Variables can appear in two kinds of places in UnrealScript: instance variables, which
+apply to an entire object, appear immediately after the class declarations. Local
+variables appear within a function, and are only active while that function executes.
+Instance variables are declared with the &quot;var&quot; keyword. Local variables are
+declard with the &quot;local&quot; keyword.</p>
+
+<p>Here are the basic variable types supported in UnrealScript: 
+
+<ul>
+  <b>
+  <li>byte:</b> A single-byte value ranging from 0 to 255. </li>
+  <b>
+  <li>int:</b> A 32-bit integer value. </li>
+  <b>
+  <li>bool:</b> A boolean value: either &quot;true&quot; or &quot;false&quot;. </li>
+  <b>
+  <li>float:</b> A 32-bit floating point number. </li>
+  <b>
+  <li>string:</b> A string of characters. </li>
+  <b>
+  <li>name:</b> The name of an item in Unreal (such as the name of a function, state, class,
+    etc). Names are stored as a 16-bit index into the global name table. Names correspond to
+    simple strings of 1-31 characters. Names are not like strings: strings can be modified
+    dynamically, but names can only take on predefined name values. </li>
+  <b>
+  <li>Enumeration:</b> A variable that can take on one of several predefined name values. For
+    example, the ELightType enumeration defined in the Actor script describes a dynamic light
+    and takes on a value like LT_None, LT_Pulse, LT_Strobe, and so on. </li>
+  <b>
+  <li>Object and actor references:</b> A variable that refers to another object or actor in
+    the world. For example, the Pawn class has an &quot;Enemy&quot; actor reference that
+    specifies which actor the pawn should be trying to attack. Object and actor references are
+    very powerful tools, because they enable you to access the variables and functions of
+    another actor. For example, in the Pawn script, you can write
+    &quot;Enemy.Damage(123)&quot; to call your enemy&#146;s Damage function &#150; resulting
+    in the enemy taking damage. Object references may also contain a special value called
+    &quot;None&quot;, which is the equivalent of the C &quot;NULL&quot; pointer: it says
+    &quot;this variable doesn&#146;t refer to any object&quot;. </li>
+  <b>
+  <li>Structs:</b> Similar to C structures, UnrealScript structs let you create new variable
+    types that contain sub-variables. For example, two commonly-used structs are
+    &quot;vector&quot;, which consists of an X, Y, and Z component; and &quot;rotator&quot;,
+    which consists of a pitch, yaw, and roll component.</li>
+</ul>
+
+<p>Variables may also contain additional specifiers such as &quot;const&quot; that further
+describe the variable. Actually, there are quite a lot of specifiers which you
+wouldn&#146;t expect to see in a general-purpose programming language, mainly as a result
+of wanting UnrealScript to natively support many game- and environment- specific concepts:
+
+<ul>
+  <b>
+  <li>const:</b> Advanced. Treats the contents of the variable as a constant. In UnrealScript,
+    you can read the value of const variables, but you can&#146;t write to them.
+    &quot;Const&quot; is only used for variables which the engine is responsible for updating,
+    and which can&#146;t be safely updated from UnrealScript, such as an actor&#146;s Location
+    (which can only be set by calling the MoveActor function). </li>
+  <b>
+  <li>input:</b> Advanced. Makes the variable accessible to Unreal&#146;s input system, so
+    that input (such as button presses and joystick movements) can be directly mapped onto it.
+    Only relevent with variables of type &quot;byte&quot; and &quot;float&quot;. </li>
+  <b>
+  <li>transient:</b> Advanced. Declares that the variable is for temporary use, and isn&#146;t
+    part of the object&#146;s persistent state. Transient variables are not saved to disk.
+    Transient variables are initialized to zero when an actor is loaded. </li>
+  <b>
+  <li>intrinsic:</b> Advanced. Declares that the variable is loaded and saved by C++ code,
+    rather than by UnrealScript.</li>
+  <li><strong>private:</strong> The variable is private, and may only be accessed by the
+    class's script; no other classes (including subclasses) may access it.</li>
+</ul>
+
+<p>Arrays are declared using the following syntax:</p>
+</font>
+
+<pre><small>var int MyArray[20]; // Declares an array of 20 ints.</small></pre>
+<font size="2">
+
+<p>UnrealScript supports only single-dimensional arrays, though you can simulate
+multidimensional arrays by carrying out the row/column math yourself.</p>
+
+<p>In UnrealScript, you can make an instance variable &quot;editable&quot;, so that users
+can edit the variable&#146;s value in UnrealEd. This mechanism is responsible for the
+entire contents of the &quot;Actor Properties&quot; dialog in UnrealEd: everything you see
+there is simply an UnrealScript variable, which has been declared editable.</p>
+
+<p>The syntax for declaring an editable variable is as follows:</p>
+</font>
+
+<pre><small>var() int MyInteger; // Declare an editable integer in the default category.
+var(MyCategory) bool MyBool; // Declare an editable integer in &quot;MyCategory&quot;.</small></pre>
+<font face="Arial"><i><b>
+
+<p>Object and actor reference variables</p>
+</b></i></font><font size="2">
+
+<p>You can declare a variable that refers to an actor or object like this:</p>
+</font>
+
+<pre><small>var actor A; // An actor reference.
+var pawn P; // A reference to an actor in the Pawn class.
+var texture T; // A reference to a texture object.</small></pre>
+<font size="2">
+
+<p>The variable &quot;P&quot; above is a reference to an actor in the Pawn class. Such a
+variable can refer to any actor that belongs to a subclass of Pawn. For example, P might
+refer to a Brute, or a Skaarj, or a Manta. It can be any kind of Pawn. However, P can
+never refer to a Trigger actor (because Trigger is not a subclass of Pawn).</p>
+
+<p>One example of where it&#146;s handy to have a variable refering to an actor is the
+Enemy variable in the Pawn class, which refers to the actor which the Pawn is trying to
+attack.</p>
+
+<p>When you have a variable that refers to an actor, you can access that actor&#146;s
+variables, and call its functions. For example:</p>
+</font>
+
+<pre><small>// Declare two variables that refer to a pawns.
+var pawn P, Q;
+&nbsp;
+// Here is a function that makes use of P.
+// It displays some information about P.
+function MyFunction()
+{
+	// Set P&#146;s enemy to Q.
+	P.Enemy = Q;
+&nbsp;
+	// Tell P to play his running animation.
+	P.PlayRunning();
+}</small></pre>
+<font size="2">
+
+<p>Variables that refer to actors always either refer to a valid actor (any actor that
+actually exists in the level), or they contain the value &quot;None&quot;. None is
+equivalent to the C/C++ &quot;NULL&quot; pointer. However, in UnrealScript, it is safe to
+access variables and call functions with a &quot;None&quot; reference; the result is
+always zero.</p>
+
+<p>Note that an object or actor reference &quot;points to&quot; another actor or object,
+it doesn&#146;t &quot;contain&quot; an actor or object. The C equivalent of an actor
+reference is a pointer to an object in the AActor class (in C, you&#146;d say an </font><font
+face="Courier New" size="1">AActor*</font><font size="2">). For example, you could have
+two monsters in the world, Bob and Fred, who are fighting each other. Bob&#146;s
+&quot;Enemy&quot; variable would &quot;point to&quot; Fred, and Fred&#146;s
+&quot;Enemy&quot; variable would &quot;point to&quot; Bob.</p>
+
+<p>Unlike C pointers, UnrealScript object references are always safe and infallible. It is
+impossible for an object reference to refer to an object that doesn&#146;t exist or is
+invalid (other than the special-case &quot;None&quot; value). In UnrealScript, when an
+actor or object is destroyed, all references to it are automatically set to
+&quot;None&quot;.</p>
+</font>
+
+<h3>Class reference variables</h3>
+
+<p><font size="2">In Unreal, classes are objects just like actors, textures, and sounds
+are objects.&nbsp; Class objects belong to the class named &quot;class&quot;.&nbsp; Now,
+there will often be cases where you'll want to store a reference to a class object, so
+that you can spawn an actor belonging to that class (without knowing what the class is at
+compile-time).&nbsp; For example:</font></p>
+
+<pre><font size="3">var() class C;
+var actor A;
+A = Spawn( C ); // Spawn an actor belonging to some arbitrary class C.</font></pre>
+
+<p><font size="2">Now, be sure not to confuse the roles of a class C, and an object O
+belonging to class C.&nbsp; To give a really shaky analogy, a class is like a pepper
+grinder, and an object is like pepper.&nbsp; You can use the pepper grinder (the class) to
+create pepper (objects of that class) by turning the crank (calling the Spawn
+function)...BUT, a pepper grinder (a class) is <em><strong>not</strong></em> pepper (an
+object belonging to the class), so you MUST NOT TRY TO EAT IT!</font></p>
+
+<p><font size="2">When declaring variables that reference class objects, you can
+optionally use the special class&lt;classlimitor&gt; syntax to limit the variable to only
+containing references to classes which expand a given superclass.&nbsp; For example, in
+the declaration:</font></p>
+
+<pre><font size="3">var class&lt;actor&gt; ActorClass;</font></pre>
+
+<p><font size="2">The variable ActorClass may only reference a class that expands the
+&quot;actor&quot; class.&nbsp; This is useful for improving compile-time type checking.
+&nbsp; For example, the Spawn function takes a class as a parameter, but only makes sense
+when the given class is a subclass of Actor, and the class&lt;classlimitor&gt; syntax
+causes the compiler to enforce that requirement.</font></p>
+
+<p><font size="2">As with dynamic object casting, you can dynamically cast classes like
+this:</font></p>
+
+<pre><font size="3">class&lt;actor&gt;( SomeFunctionCall() )</font></pre>
+
+<p><font face="Arial"><i><b><i><b>Enumerations</b></i></b></i></font></p>
+<font size="2">
+
+<p>Enumerations exist in UnrealScript as a convenient way to declare variables that can
+contain &quot;one of&quot; a bunch of keywords. For example, the actor class contains the
+enumeration EPhysics which describes the physics which Unreal should apply to the actor.
+This can be set to one of the predefined values like PHYS_None, PHYS_Walking,
+PHYS_Falling, and so on.</p>
+
+<p>Internally, enumerations are stored as byte variables. In designing UnrealScript,
+enumerations were not seen as a necessity, but it makes code so much easier to read to see
+that an actor&#146;s physics mode is being set to &quot;PHYS_Swimming&quot; than (for
+example) &quot;3&quot;.</p>
+
+<p>Here is sample code that declares enumerations.</p>
+</font>
+
+<pre><small>// Declare the EColor enumeration, with three values.
+enum EColor
+{
+	CO_Red,
+	CO_Green,
+	CO_Blue
+};
+&nbsp;
+// Now, declare two variables of type EColor.
+var EColor ShirtColor, HatColor;
+&nbsp;
+// Alternatively, you can declare variables and
+// enumerations together like this:
+var enum EFruit
+{
+	FRUIT_Apple,
+	FRUIT_Orange,
+	FRUIT_Bannana
+} FirstFruit, SecondFruit;</small></pre>
+<font size="2">
+
+<p>In the Unreal source, we always declare enumeration values like LT_Steady,
+PHYS_Falling, and so on, rather than as simply &quot;Steady&quot; or &quot;Falling&quot;.
+This is just a matter of programming style, and is not a requirement of the language.</p>
+</font>
+
+<p><font size="2">UnrealScript only recognizes unqualified enum tags (like FRUIT_Apple) in
+classes where the enumeration was defined, and in its subclasses.&nbsp; If you need to
+refer to an enumeration tag defined somewhere else in the class hierarchy, you must
+&quot;qualify it&quot;:</font></p>
+
+<pre><small>FRUIT_Apple // If Unreal can't find this enum tag...
+EFruit.FRUIT_Apple // Then qualify it like this.</small></pre>
+<font face="Arial"><i><b>
+
+<p>Structs</p>
+</b></i></font><font size="2">
+
+<p>An UnrealScript struct is a way of cramming a bunch of variables together into a new
+kind of super-variable called a struct. UnrealScript structs are just like C structs, in
+that they can contain any simple variables or arrays.</p>
+
+<p>You can declare a struct as follows:</p>
+</font>
+
+<pre><small>// A point or direction vector in 3D space.
+struct Vector
+{
+	var float X;
+	var float Y;
+	var float Z
+};</small></pre>
+<font size="2">
+
+<p>Once you declare a struct, you are ready to start declaring specific variables of that
+struct type:</p>
+</font>
+
+<pre><small>// Declare a bunch of variables of type Vector.
+var Vector Position;
+var Vector Destination;</small></pre>
+
+<p>To access a component of a struct, use code like the following.</p>
+
+<pre><small>function MyFunction()
+{
+	Local Vector A, B, C;
+	&nbsp;
+	// Add some vectors.
+	C = A + B;
+&nbsp;
+	// Add just the x components of the vectors.
+	C.X = A.X + B.X;
+&nbsp;
+	// Pass vector C to a function.
+	SomeFunction( C );
+&nbsp;
+	// Pass certain vector components to a function.
+	OtherFunction( A.X, C.Z );
+}</small>&nbsp;</pre>
+<font size="2">
+
+<p>You can do anything with Struct variables that you can do with other variables: you can
+assign variables to them, you can pass them to functions, and you can access their
+components.</p>
+
+<p>There are several Structs defined in the Object class which are used throughout Unreal.
+You should become familiar with their operation, as they are fundamental building blocks
+of scripts: 
+
+<ul>
+  <b>
+  <li>Vector:</b> A unique 3D point or vector in space, with an X, Y, and Z component. </li>
+  <b>
+  <li>Plane:</b> Defines a unique plane in 3D space. A plane is defined by its X, Y, and Z
+    components (which are assumed to be normalized) plus its W component, which represents the
+    distance of the plane from the origin, along the plane&#146;s normal (which is the
+    shortest line from the plane to the origin). </li>
+  <b>
+  <li>Rotation:</b> A rotation defining a unique orthogonal coordinate system. A rotation
+    contains Pitch, Yaw, and Roll components. </li>
+  <b>
+  <li>Coords:</b> An arbitrary coordinate system in 3D space. </li>
+  <b>
+  <li>Color:</b> An RGB color value. </li>
+  <b>
+  <li>Region:</b> Defines a unique convex region within a level.</li>
+</ul>
+</font><font face="Arial"><i><b>
+
+<p>Functions</p>
+</b></i></font><font size="2">
+
+<p>In UnrealScript, you can declare new functions and write new versions of existing
+functions. Functions can take one or more parameters (of any variable type UnrealScript
+supports), and can optionally return a value. Though most functions are written directly
+in UnrealScript, you can also declare functions that can be called from UnrealScript, but
+which are implemented in C++ and reside in a DLL. The Unreal technology supports all
+possible combinations of function calling: The C++ engine can call script functions;
+script can call C++ functions; and script can call script.</p>
+
+<p>Here is a simple function declaration. This function takes a vector as a parameter, and
+returns a floating point number:</p>
+</font>
+
+<pre><small>// Function to compute the size of a vector.
+function float VectorSize( vector V )
+{
+	return sqrt( V.X * V.X + V.Y * V.Y + V.Z * V.Z );
+}</small></pre>
+<font size="2">
+
+<p>The word &quot;function&quot; always precedes a function declaration. It is followed by
+the optional return type of the function (in this case, &quot;float&quot;), then the
+function name, and then the list of function parameters enclosed in parenthesis.</p>
+
+<p>When a function is called, the code within the brackets is executed. Inside the
+function, you can declare local variables (using the &quot;local&quot; keyword&quot;), and
+execute any UnrealScript code. The optional &quot;return&quot; keyword causes the function
+to immediately return a value.</p>
+
+<p>You can pass any UnrealScript types to a function (including arrays), and a function
+can return any type.</p>
+
+<p>By default, any local variables you declare in a function are initialized to zero.</p>
+
+<p>Function calls can be recursive. For example, the following function computes the
+factorial of a number:</p>
+</font>
+
+<pre><small>// Function to compute the factorial of a number.
+function int Factorial( int Number )
+{
+	if( Number &lt;= 0 )
+		return 1;
+	else
+		return Number * Factorial( Number &#150; 1 );
+}</small></pre>
+<font size="2">
+
+<p>Some UnrealScript functions are called by the engine whenever certain events occur. For
+example, when an actor is touched by another actor, the engine calls its &quot;Touch&quot;
+function to tell it who is touching it. By writing a custom &quot;Touch&quot; function,
+you can take special actions as a result of the touch occuring:</p>
+</font>
+
+<pre><small>// Called when something touches this actor.
+function Touch( actor Other )
+{
+	Log( &quot;I was touched!&quot;)
+	Other.Message( &quot;You touched me!&quot; );
+}</small></pre>
+<font size="2">
+
+<p>The above function illustrates several things. First of all, the function writes a
+message to the log file using the &quot;Log&quot; command (which is the equivalent of
+Basic&#146;s &quot;print&quot; command and C&#146;s &quot;printf&quot;). Second, it calls
+the &quot;Message&quot; function residing in the actor Other. Calling functions in other
+actors is a common action in UnrealScript, and in object-oriented languages like Java in
+general, because it provides a simple means for actors to communicate with each other.</p>
+</font><font face="Arial"><i><b>
+
+<p>Function parameter specifiers</p>
+</b></i></font><font size="2">
+
+<p>When you normally call a function, UnrealScript makes a local copy of the parameters
+you pass the function. If the function modifies some of the parameters, those don&#146;t
+have any effect on the variables you passed in. For example, the following program:</p>
+</font>
+
+<pre><small>function int DoSomething( int x )
+{
+	x = x * 2;
+	return x;
+}
+function int DoSomethingElse()
+{
+	local int a, b;
+&nbsp;
+	a = 2;
+	log( &quot;The value of a is &quot; $ a );
+&nbsp;
+	b = DoSomething( a );
+	log( &quot;The value of a is &quot; $ a );
+	log( &quot;The value of b is &quot; $ b );
+}</small></pre>
+<font size="2">
+
+<p>Produces the following output when DoSomethingElse is called:</p>
+</font>
+
+<pre><small>The value of a is 2
+The value of a is 2
+The value of b is 4</small></pre>
+<font size="2">
+
+<p>In other words, the function DoSomething was futzing with a local copy of the variable
+&quot;a&quot; which was passed to it, and it was not affecting the real variable
+&quot;a&quot;.</p>
+
+<p>The &quot;out&quot; specified lets you tell a function that it should actually modify
+the variable that is passed to it, rather than making a local copy. This is useful, for
+example, if you have a function that needs to return several values to the caller. You can
+juse have the caller pass several variables to the function which are &quot;out&quot;
+values. For example:</p>
+</font>
+
+<pre><small>// Compute the minimum and maximum components of a vector.
+function VectorRange( vector V, out float Min, out float Max )
+{
+	// Compute the minimum value.
+	if ( V.X&lt;V.Y &amp;&amp; V.X&lt;V.Z ) Min = V.X;
+	else if( V.Y&lt;V.Z ) Min = V.Y;
+	else Min = V.Z;
+&nbsp;
+	// Compute the maximum value.
+	if ( V.X&gt;V.Y &amp;&amp; V.X&gt;V.Z ) Max = V.X;
+	else if( V.Y&gt;V.Z ) Max = V.Y;
+	else Max = V.Z;
+}</small></pre>
+<font size="2">
+
+<p>Without the &quot;out&quot; keyword, it would be painful to try to write functions that
+had to return more than one value.</p>
+
+<p>With the &quot;optional&quot; keyword, you can make certain function parameters
+optional, as a convenience to the caller. For UnrealScript functions, optional parameters
+which the caller doesn&#146;t specify are set to zero. For intrinsic functions, the
+default values of optional parameters depends on the function. For example, the Spawn
+function takes an optional location and rotation, which default to the spawning
+actor&#146;s location and rotation.</p>
+
+<p>The &quot;coerce&quot; keyword forces the caller&#146;s parameters to be converted to
+the specified type (even if UnrealScript normally would not perform the conversion
+automatically). This is useful for functions that deal with strings, so that the
+parameters are automatically converted to strings for you.</p>
+</font><font face="Arial"><i><b>
+
+<p>Function overriding</p>
+</b></i></font><font size="2">
+
+<p>&quot;Function overriding&quot; refers to writing a new version of a function in a
+subclass. For example, say you&#146;re writing a script for a new kind of monster called a
+Demon. The Demon class, which you just created, expands the Pawn class. Now, when a pawn
+sees a player for the first time, the pawn&#146;s &quot;SeePlayer&quot; function is
+called, so that the </font><font size="1">pawn</font><font size="2"> can start attacking
+the player. This is a nice concept, but say you wanted to handle &quot;SeePlayer&quot;
+differently in your new Demon class. How do you do this? Function overriding is the
+answer.</p>
+
+<p>To override a function, just cut and paste the function definition from the parent
+class into your new class. For example, for SeePlayer, you could add this to your Demon
+class.</p>
+</font>
+
+<pre><small>// New Demon class version of the Touch function.
+function SeePlayer( actor SeenPlayer )
+{
+	log( &quot;The demon saw a player&quot; );
+	// Add new custom functionality here&#133;
+}</small></pre>
+<font size="2">
+
+<p>Function overriding is the key to creating new UnrealScript classes efficiently. You
+can create a new class that expands on an existing class. Then, all you need to do is
+override the functions which you want to be handled differently. This enables you to
+create new kinds of objects without writing gigantic amounts of code.</p>
+
+<p>Several functions in UnrealScript are declared as &quot;final&quot;. The
+&quot;final&quot; keyword (which appears immediately before the word &quot;function&quot;)
+says &quot;this function cannot be overridden by child classes&quot;. This should be used
+in functions which you know nobody would want to override, because it results in faster
+script code. For example, say you have a &quot;VectorSize&quot; function that computes the
+size of a vector. There&#146;s absolutely no reason anyone would ever override that, so
+declare it as &quot;final&quot;. On the other hand, a function like &quot;Touch&quot; is
+very context-dependent and should not be final.</p>
+</font><b><font face="Arial"><i>
+
+<p>Advanced function specifiers</p>
+</i></font><font size="2">
+
+<p>Static: </b>A static function acts like a C global function, in that it can be called
+without having a reference to an object of the class.&nbsp; Static functions can call
+other static functions, and can access the default values of variables.&nbsp; Static
+functions cannot call non-static functions and they cannot access instance variables
+(since they are not executed with respect to an instance of an object).&nbsp; Unlike
+languages like C++, static functions are virtual and can be overridden in child classes.
+&nbsp; This is useful in cases where you wish to call a static function in a variable
+class (a class not known at compile time, but referred to by a variable or an expression).</p>
+
+<p><b>Singular: </b>The &quot;singular&quot; keyword, which appears immediately before a
+function declaration, prevents a function from calling itself recursively. The rule is
+this: If a certain actor is already in the middle of a singular function, any subsequent
+calls to singular functions will be skipped over. This is useful in avoiding
+infinite-recursive bugs in some cases. For example, if you try to move an actor inside of
+your &quot;Bump&quot; function, there is a good chance that the actor will bump into
+another actor during its move, resulting in another call to the &quot;Bump&quot; function,
+and so on. You should be very careful in avoiding such behaviour, but if you can&#146;t
+write code with complete confidence that you&#146;re avoiding such potential recursive
+situations, use the &quot;singular&quot; keyword.</p>
+<b>
+
+<p>Intrinsic: </b>You can declare UnrealScript functions as &quot;intrinsic&quot;, which
+means that the function is callable from UnrealScript, but is actually written (elsewhere)
+in C++. For example, the Actor class contains a lot of intrinsic function definitions,
+such as:</p>
+</font>
+
+<pre><small>intrinsic(266) final function bool Move( vector Delta );</small></pre>
+<font size="2">
+
+<p>The number inside the parenthesis after the &quot;intrinsic&quot; keyword corresponds
+to the number of the function as it was declared in C++ (using the AUTOREGISTER_INTRINSIC
+macro). The intrinsic function is expected to reside in the DLL named identically to the
+package of the class containing the UnrealScript definition.</p>
+<b>
+
+<p>Latent:</b> Declares that an intrinsic function is latent, meaning that it can only be
+called from state code, and it may return after some game-time has passed.</p>
+<b>
+
+<p>Iterator:</b> Declares that an intrinsic function is an iterator, which can be used to
+loop through a list of actors using the &quot;foreach&quot; command.</p>
+<b>
+
+<p>Simulated:</b> Declares that a function may execute on the client-side when an actor is
+either a simulated proxy or an autonomous proxy. All functions that are both intrinsic and
+final are automatically simulated as well.</p>
+<b>
+
+<p>Operator</b>, <b>PreOperator</b>, <b>PostOperator</b>: These keywords are for declaring
+a special kind of function called an operator (equivalent to C++ operators). This is how
+UnrealScript knows about all of the built-in operators like &quot;+&quot;, &quot;-&quot;,
+&quot;==&quot;, and &quot;||&quot;. I'm not going into detail on how operators work in
+this document, but the concept of operators is similar to C++, and you can declare new
+operator functions and keywords as UnrealScript functions or intrinsic functions.</p>
+</font>
+
+<p><font size="2"><strong>Event</strong>:</font><font size="1"> </font><small>The
+&quot;event&quot; keyword has the same meaning to UnrealScript as &quot;function&quot;.
+However, when you export a C++ header file from Unreal using &quot;unreal -make -h&quot;,
+UnrealEd automatically generates a C++ -&gt; UnrealScript calling stub for each
+&quot;event&quot;.&nbsp; This is a much cleaner replacement for the old
+&quot;PMessageParms&quot; struct, because it automatically keeps C++ code synched up with
+UnrealScript functions and eliminates the possibility of passing invalid parameters to an
+UnrealScript function. For example, this bit of UnrealScript code:</small></p>
+
+<pre><small>event Touch( Actor Other )
+{ ... }</small></pre>
+
+<p>Generates this piece of code in EngineClasses.h:</p>
+
+<pre><small>void Touch(class AActor* Other)
+{
+    FName N(&quot;Touch&quot;,FNAME_Intrinsic);
+&nbsp;&nbsp;&nbsp;&nbsp;struct {class AActor* Other; } Parms;
+&nbsp;&nbsp;&nbsp;&nbsp;Parms.Other=Other;
+&nbsp;&nbsp;&nbsp;&nbsp;ProcessEvent(N,&amp;Parms);
+}</small></pre>
+
+<p>Thus enabling you to call the UnrealScript function from C++ like this:</p>
+
+<pre><small>AActor *SomeActor, *OtherActor;
+Actor-&gt;Touch(OtherActor);</small></pre>
+<font face="Arial"><i><b>
+
+<p>Flow control</p>
+</b></i></font><font size="2">
+
+<p>UnrealScript supports all the standard flow-control statements of C/C++/Java: 
+
+<ul>
+  <li>&quot;For&quot; loops let you cycle through a loop as long as some condition is met. For
+    example:</li>
+</ul>
+</font>
+
+<pre><small>// Example of &quot;for&quot; loop.
+function ForExample()
+{
+	local int i;
+	log( &quot;Demonstrating the for loop&quot; );
+	for( i=0; i&lt;4; i++ )
+	{
+		log( &quot;The value of i is &quot; $ i );
+	}
+	log( &quot;Completed with i=&quot; $ i);
+}</small></pre>
+<font size="2">
+
+<p>The output of this loop is:</p>
+</font>
+
+<pre><small>Demonstrating the for loop
+The value of i is 0
+The value of i is 1
+The value of i is 2
+The value of i is 3
+Completed with i=4</small></pre>
+<font size="2">
+
+<p>In a for loop, you must specify three expressions separated by semicolons. The first
+expression is for initializing a variable to its starting value. The second expression
+gives a condition which is checked before each iteration of the loop executes; if this
+expression is true, the loop executes. If it&#146;s false, the loop terminates. The third
+condition gives an expression which increments the loop counter.</p>
+
+<p>Though most &quot;for&quot; loop expressions just update a counter, you can also use
+&quot;for&quot; loops for more advanced things like traversing linked lists, by using the
+appropriate initialization, termination, and increment expressions.</p>
+
+<p>In all of the flow control statements, you can either execute a single statement,
+without brackets, as follows:</p>
+</font>
+
+<pre><small>for( i=0; i&lt;4; i++ )
+	log( &quot;The value of i is &quot; $ i );</small></pre>
+<font size="2">
+
+<p>Or you can execute multiple statements, surrounded by brackets, like this:</font><font
+face="Courier New" size="1"> </p>
+</font>
+
+<pre><small>for( i=0; i&lt;4; i++ )
+{
+	log( &quot;The value of i is&quot; );
+	log( i );
+}</small></pre>
+
+<ul>
+  <font size="2">
+  <li>&quot;Do&quot;-&quot;Until&quot; loops let you cycle through a loop while some ending
+    expression is true.&nbsp; Note that Unreal's do-until syntax differs from C/Java (which
+    use do-while).</li>
+</ul>
+</font>
+
+<pre><small>// Example of &quot;do&quot; loop.
+function DoExample()
+{
+	local int i;
+	log( &quot;Demonstrating the do loop&quot; );
+	do
+	{
+		log( &quot;The value of i is &quot; $ i );
+		i = i + 1;
+	} until( i == 4 );
+	log( &quot;Completed with i=&quot; $ i);
+}</small></pre>
+<font size="2">
+
+<p>The output of this loop is:</p>
+</font>
+
+<pre><small>Demonstrating the do loop
+The value of i is 0
+The value of i is 1
+The value of i is 2
+The value of i is 3
+Completed with i=4</small></pre>
+
+<ul>
+  <font size="2">
+  <li>&quot;While&quot; loops let you cycle through a loop while some starting expression is
+    true.</li>
+</ul>
+</font>
+
+<pre><small>// Example of &quot;while&quot; loop.
+function WhileExample()
+{
+	local int i;
+	log( &quot;Demonstrating the while loop&quot; );
+	while( i &lt; 4 )
+	{
+		log( &quot;The value of i is &quot; $ i );
+		i = i + 1;
+	}
+	log( &quot;Completed with i=&quot; $ i);
+}</small></pre>
+<font size="2">
+
+<p>The output of this loop is:</p>
+</font>
+
+<pre><small>Demonstrating the do loop
+The value of i is 0
+The value of i is 1
+The value of i is 2
+The value of i is 3
+Completed with i=4</small></pre>
+
+<ul>
+  <font size="2">
+  <li>The &quot;break&quot; command exits out of the nearest loop (&quot;For&quot;,
+    &quot;Do&quot;, or &quot;While&quot;).</li>
+</ul>
+</font>
+
+<pre><small>// Example of &quot;while&quot; loop.
+function WhileExample()
+{
+	local int i;
+	log( &quot;Demonstrating break&quot; );
+	for( i=0; i&lt;10; i++ )
+	{
+		if( i == 3 )
+			break;
+		log( &quot;The value of i is &quot; $ i );
+	}
+	log( &quot;Completed with i=&quot; $ i );
+}</small></pre>
+<font size="2">
+
+<p>The output of this loop is:</p>
+</font>
+
+<pre><small>Demonstrating break
+The value of i is 0
+The value of i is 1
+The value of i is 2
+Completed with i=3</small></pre>
+
+<ul>
+  <font size="2">
+  <li>The &quot;Goto&quot; command goes to a label somewhere in the current function or state.</li>
+</ul>
+</font>
+
+<pre><small>// Example of &quot;goto&quot;.
+function GotoExample()
+{
+	log( &quot;Starting GotoExample&quot; );
+	goto Hither;
+Yon:
+	log( &quot;At Yon&quot; );
+	goto Elsewhere;
+Hither:
+	log( &quot;At Hither&quot; );
+	goto Yon;
+Elsewhere:
+	log( &quot;At Elsewhere&quot; );
+}</small></pre>
+<font size="2">
+
+<p>The output is:</p>
+</font>
+
+<pre><small>Starting GotoExample
+At Hither
+At Yon
+At Elsewhere</small></pre>
+
+<ul>
+  <font size="2">
+  <li>&quot;If&quot;, &quot;Else If&quot;, and &quot;Else&quot; let you execute code if
+    certain conditions are met.</li>
+</ul>
+</font>
+
+<pre><small>// Example of simple &quot;if&quot;.
+if( LightBrightness &lt; 20 )
+	log( &quot;My light is dim&quot; );
+&nbsp;
+// Example of &quot;if-else&quot;.
+if( LightBrightness &lt; 20 )
+	log( &quot;My light is dim&quot; );
+else
+	log( &quot;My light is bright&quot; );
+&nbsp;
+// Example if &quot;if-else if-else&quot;.
+if( LightBrightness &lt; 20 )
+	log( &#145;My light is dim&quot; );
+else if( LightBrightness &lt; 40 )
+	log( &quot;My light is medium&quot; );
+else if( LightBrightness &lt; 60 )
+	log( &quot;My light is kinda bright&quot; );
+else
+	log( &quot;My light is very bright&quot; );
+&nbsp;
+// Example if &quot;if&quot; with brackets.
+if( LightType == LT_Steady )
+{
+	log( &quot;Light is steady&quot; );
+}
+else
+{
+	log( &quot;Light is not steady&quot; );
+}</small></pre>
+
+<ul>
+  <font size="2">
+  <li>&quot;Switch&quot;, &quot;Case&quot;, &quot;Default&quot;, and &quot;Break&quot; let you
+    handle lists of conditions easily.</li>
+</ul>
+</font>
+
+<pre><small>// Example of switch-case.
+function TestSwitch()
+{
+	// Executed one of the case statements below, based on
+	// the value in LightType.
+	select( LightType )
+	{
+		case LT_None:
+			log( &quot;There is no lighting&quot; );
+			break;
+		case LT_Steady:
+			log( &quot;There is steady lighting&quot; );
+			break;
+		case LT_Backdrop:
+			log( &quot;There is backdrop lighting&quot; );
+			break;
+		default:
+			log( &quot;There is dynamic&quot; );
+			break;
+	}
+}</small></pre>
+<font size="2">
+
+<p>A &quot;switch&quot; statement consists of one or more &quot;case&quot; statements, and
+an optional &quot;default&quot; statement. After a switch statement, execution goes to the
+matching &quot;case&quot; statement if there is one; otherwise execution goes to the
+&quot;default&quot; statement; otherwise execution continues past the end of the
+&quot;select&quot; statement.</p>
+
+<p>After you write code following a &quot;case&quot; label, you must use a
+&quot;break&quot; statement to cause execution to go past the end of the
+&quot;switch&quot; statement. If you don&#146;t use a &quot;break&quot;, execution
+&quot;falls through&quot; to the next &quot;case&quot; handler.</p>
+</font><font face="Arial"><i><b>
+
+<p>States</p>
+</b></i></font><font size="2">
+
+<p>Historically, game programmers have been using the concept of states ever since games
+evolved past the &quot;pong&quot; phase. States (and what is known as &quot;state machine
+programming&quot;) are a natural way of making complex object behaviour manageable.
+However, before UnrealScript, states have not been supported at the language level,
+requiring developers to create C/C++ &quot;switch&quot; statements based on the
+object&#146;s state. Such code was difficult to write and update.</p>
+
+<p>UnrealScript supports states at the language level.</p>
+
+<p>In UnrealScript, each actor in the world is always in one and only one state. Its state
+reflects the action it wants to perform. For example, moving brushes have several states
+like &quot;StandOpenTimed&quot; and &quot;BumpOpenTimed&quot;. Pawns have several states
+such as &quot;Dying&quot;, &quot;Attacking&quot;, and &quot;Wandering&quot;.</p>
+
+<p>In UnrealScript, you can write functions and code which exist in a particular state.
+These functions are only called when the actor is in that state. For example, say
+you&#146;re writing a monster script, and you&#146;re contemplating how to handle the
+&quot;SeePlayer&quot; function. When you&#146;re wandering around, you want to attack the
+player you see. When you&#146;re already attacking the player, you want to continue on
+uninterrupted.</p>
+
+<p>The easiest way to do this is by defining several states (Wandering and Attacking), and
+writing a different version of &quot;Touch&quot; in each state. UnrealScript supports
+this.</p>
+
+<p>Before delving deeper into states, you need to understand that there are two major
+benefits to states, and one complication: 
+
+<ul>
+  <li>Benefit: States provide a simple way to write state-specific functions, so that you can
+    handle the same function in different ways, depending on what the actor is doing. </li>
+  <li>Benefit: With a state, you can write special &quot;state code&quot;, using all of the
+    regular UnrealScript commands plus several special functions known as &quot;latent
+    functions&quot;. A latent function is a function which executes &quot;slowly&quot;, and
+    may return after a certain amount of &quot;game time&quot; has passed. This enables you to
+    perform time-based programming &#150; a major benefit which neither C, C++, nor Java
+    offer. Namely, you can write code in the same way you conceptualize it; for example, you
+    can write a script that says the equivalent of &quot;open this door; pause 2 seconds; play
+    this sound effect; open that door; release that monster and have it attack the
+    player&quot;. You can do this with simple, linear code, and the Unreal engine takes care
+    of the details of managing the time-based execution of the code. </li>
+  <li>Complication: Now that you can have functions (like &quot;Touch&quot;) overridden in
+    multiple states as well as in child classes, you have the burden of figuring out exactly
+    which &quot;Touch&quot; function is going to be called in a specific situation.
+    UnrealScript provides rules which clearly delineate this process, but it is something you
+    must be aware of if you create complex hierarchies of classes and states.</li>
+</ul>
+
+<p>Here is an example of states from the TriggerLight script:</p>
+</font>
+
+<pre><small>// Trigger turns the light on.
+state() TriggerTurnsOn
+{
+	function Trigger( actor Other, pawn EventInstigator )
+	{
+		Trigger = None;
+		Direction = 1.0;
+		Enable( 'Tick' );
+	}
+}
+&nbsp;
+// Trigger turns the light off.
+state() TriggerTurnsOff
+{
+	function Trigger( actor Other, pawn EventInstigator )
+	{
+		Trigger = None;
+		Direction = -1.0;
+		Enable( 'Tick' );
+	}
+}</small></pre>
+<font size="2">
+
+<p>Here you are declaring two different states (TriggerTurnsOn and TriggerTurnsOff), and
+you&#146;re writing a different version of the Trigger function in each state. Though you
+could pull off this implementation without states, using states makes the code far more
+modular and expandable: in UnrealScript, you can easily subclass an existing class, add
+new states, and add new functions. If you had tried to do this without states, the
+resulting code would be more difficult to expand later.</p>
+
+<p>A state can be declared as editable, meaning that the user can set an actor&#146;s
+state in UnrealEd, or not. To declare an editable state, do the following:</p>
+</font>
+
+<pre><small>state() MyState
+{
+	//...
+}</small></pre>
+<font size="2">
+
+<p>To declare a non-editable state, do this:</p>
+</font>
+
+<pre><small>state MyState
+{
+	//...
+}</small></pre>
+<font size="2">
+
+<p>You can also specify the automatic, or initial state that an actor should be in by
+using the &quot;auto&quot; keyword. This causes all new actors to be placed in that state
+when they first are activated:</p>
+</font>
+
+<pre><small>auto state MyState
+{
+	//...
+}</small></pre>
+<font face="Arial"><i><b>
+
+<p>State code</p>
+</b></i></font><font size="2">
+
+<p>In addition to functions, a state can contain one or more labels followed by
+UnrealScript code. For example:</p>
+</font>
+
+<pre><small>auto state MyState
+{
+Begin:
+	Log( &quot;MyState has just begun!&quot; );
+	Sleep( 2.0 );
+	Log( &quot;MyState has finished sleeping&quot; );</small>
+<small>	goto Begin;
+}</small></pre>
+<font size="2">
+
+<p>The above state code prints the message &quot;MyState has just begun!&quot;, then it
+pauses for two seconds, then it prints the message &quot;MyState has finished
+sleeping&quot;. The interesting thing in this example is the call to the latent function
+&quot;Sleep&quot;: this function call doesn&#146;t return immediately, but returns after a
+certain amount of game time has passed. Latent functions can only be called from within
+state code, and not from within functions. Latent functions let you manage complex chains
+of events which include the passage of time.</p>
+
+<p>All state code begins with a label definition; in the above example the label is named
+&quot;Begin&quot;. The label provides a convenient entry point into the state code. You
+can use any label name in state code, but the &quot;Begin&quot; label is special: it is
+the default starting point for code in that state. </p>
+
+<p>There are three main latent functions available to all actors: 
+
+<ul>
+  <b>
+  <li>Sleep( float Seconds )</b> pauses the state execution for a certain amount of time, and
+    then continues. </li>
+  <b>
+  <li>FinishAnim()</b> waits until the current animation sequence you&#146;re playing
+    completes, and then continues. This function makes it easy to write animation-driven
+    scripts, scripts whose execution is governed by mesh animations. For example, most of the
+    AI scripts are animation-driven (as opposed to time-driven), because smooth animation is a
+    key goal of the AI system. </li>
+  <b>
+  <li>FinishInterpolation()</b> waits for the current InterpolationPoint movement to complete,
+    and then continues.</li>
+</ul>
+
+<p>The Pawn class defines several important latent functions for actions such as
+navigating through the world and short-term movement. See the separate AI docs for
+descriptions of their usage.</p>
+
+<p>Three intrinsic UnrealScript functions are particularly useful when writing state code:
+
+<ul>
+  <li>The &quot;Goto&quot; function (similar to the C/C++/Basic goto) within a state causes
+    the state code to continue executing at a different label. </li>
+  <li>The special Goto('') command within a state causes the state code execution to stop.
+    State code execution doesn&#146;t continue until you go to a new state, or go to a new
+    label within the current state. </li>
+  <li>The &quot;GotoState&quot; function causes the actor to go to a new state, and optionally
+    continue at a specified label (if you don&#146;t specify a label, the default is the
+    &quot;Begin&quot; label). You can call GotoState from within state code, and it goes to
+    the destination immediately. You can also call GotoState from within any function in the
+    actor, but that does not take effect immediately: it doesn&#146;t take effect until
+    execution returns back to the state code.</li>
+</ul>
+
+<p>Here is an example of the state concepts discussed so far:</p>
+</font>
+
+<pre><small>// This is the automatic state to execute.
+auto state Idle
+{
+	// When touched by another actor&#133;
+	function Touch( actor Other )
+	{
+		log( &quot;I was touched, so I&#146;m going to Attacking&quot; );
+		GotoState( &#145;Attacking&#146; );
+		Log( &quot;I have gone to the Attacking state&quot; );
+	}
+Begin:
+	log( &quot;I am idle&#133;&quot; );
+	sleep( 10 );
+	goto &#145;Begin&#146;;
+}
+&nbsp;
+// Attacking state.
+state Attacking
+{
+Begin:
+	Log( &quot;I am executing the attacking state code&quot; );
+	//...
+}</small></pre>
+<font size="2">
+
+<p>When you run this program and then go touch the actor, you will see:</p>
+</font>
+
+<pre><small>I am idle&#133;
+I am idle&#133;
+I am idle&#133;
+I was touched, so I&#146;m going to Attacking
+I have gone to the Attacking state
+I am executing the attacking state code</small></pre>
+<font size="2">
+
+<p>Make sure you understand this important aspect of GotoState: When you call GotoState
+from within a function, it does not go to the destination immediately, rather it goes
+there once execution returns back to the state code.</p>
+</font><font face="Arial"><i><b>
+
+<p>State inheretance and scoping rules</p>
+</b></i></font><font size="2">
+
+<p>In UnrealScript, when you subclass an existing class, your new class inherets all of
+the variables, functions and states from its parent class. This is well-understood.</p>
+
+<p>However, the addition of the state abstraction to the UnrealScript programming model
+adds additional twists to the inheretance and scoping rules. The complete inheretance
+rules are: 
+
+<ul>
+  <li>A new class inherets all of the variables from its parent class. </li>
+  <li>A new class inherents all of its parent class&#146;s non-state functions. You can
+    override any of those inhereted non-state functions. You can add entirely new non-state
+    functions. </li>
+  <li>A new class inherets all of its parent class&#146;s states, including the functions and
+    labels within those states. You can override any of the inhereted state functions, and you
+    can override any of the inhereted state labels, you can add new state functions, and you
+    can add new state labels.</li>
+</ul>
+
+<p>Here is an example of all the overriding rules:</p>
+</font>
+
+<pre><small>// Here is an example parent class.
+class MyParentClass expands Actor
+	package(MyPackage);
+&nbsp;
+// A non-state function.
+function MyInstanceFunction()
+{
+	log( &quot;Executing MyInstanceFunction&quot; );
+}
+&nbsp;
+// A state.
+state MyState
+{
+	// A state function.
+	function MyStateFunction()
+	{
+		Log( &quot;Executing MyStateFunction&quot; );
+	}
+// The &quot;Begin&quot; label.
+Begin:
+	Log(&quot;Beginning MyState&quot;);
+}
+&nbsp;
+// Here is an example child class.
+class MyChildClass expands MyParentClass
+	package(MyPackage);
+&nbsp;
+// Here I&#146;m overriding a non-state function.
+function MyInstanceFunction()
+{
+	Log( &quot;Executing MyInstanceFunction in child class&quot; );
+}
+&nbsp;
+// Here I&#146;m redeclaring MyState so that I can override MyStateFunction.
+state MyState
+{
+	// Here I&#146;m overriding MyStateFunction.
+	function MyStateFunction()
+	{
+		Log( &quot;Executing MyStateFunction&quot; );
+	}
+// Here I&#146;m overriding the &quot;Begin&quot; label.
+Begin:
+	Log( &quot;Beginning MyState in MyChildClass&quot; );
+}</small></pre>
+<font size="1">
+
+<p></font><font size="2">When you have a function that is implemented globally, in one or
+more states, and in one or more parent classes, you need to understand which version of
+the function will be called in a given context. The scoping rules, which resolves these
+complex situations, are: 
+
+<ul>
+  <li>If the actor is in a state, and an implementation of the function exists somewhere in
+    that state (either in the actor&#146;s class or in some parent class), the most-derived
+    state version of the function is called. </li>
+  <li>Otherwise, the most-derived non-state version of the function is called.</li>
+</ul>
+
+<p>In complex programming situations, you will often need to call a specific version of a
+function, rather than the one that&#146;s in the current scope. To deal with these cases,
+UnrealScript provides the following keywords: 
+
+<ul>
+  <b>
+  <li>Global</b>: Calls the most-derived global (non-state) version of the function. </li>
+  <b>
+  <li>Super:</b> Calls the corresponding version of the function in the parent class. The
+    function called may either be a state or non-state function depending on context. </li>
+  <b>
+  <li>Super(classname):</b> Calls the corresponding version of the function residing in (or
+    above) the specified class. The function called may either be a state or non-state
+    function depending on context.</li>
+</ul>
+
+<p>It is not valid to combine multiple calling specifiers (i.e.
+Super(Actor).Global.Touch).</p>
+
+<p>Here are some examples of calling specifiers:</p>
+</font>
+
+<pre><small>class MyClass expands Pawn
+	package(MyPackage);
+&nbsp;
+function MyExample( actor Other )
+{
+	Super(Pawn).Touch( Other );
+	Global.Touch( Other );
+	Super.Touch( Other );
+}</small></pre>
+<font size="2">
+
+<p>As an additional example, the BeginPlay() function is called when an actor is about to
+enter into gameplay. The BeginPlay() function is implemented in the Actor class and it
+contains some important functionality that needs to be executed. Now, say you want to
+override BeginPlay() in your new class MyClass, to add some new functionality. To do that
+safely, you need to call the version of BeginPlay() in the parent class:</p>
+</font>
+
+<pre><small>class MyClass expands Pawn
+	package(MyPackage);
+&nbsp;
+function BeginPlay()
+{
+	// Call the version of BeginPlay in the parent class (important).
+	Super.BeginPlay();
+&nbsp;
+	// Now do custom BeginPlay stuff.
+	//...
+}</small></pre>
+<font face="Arial"><i><b>
+
+<p>Advanced state programming</p>
+</b></i></font><font size="2">
+
+<p>If a state doesn&#146;t override a state of the same name in the parent class, then you
+can optionally use the &quot;expands&quot; keyword to make the state expand on an existing
+state in the current class. This is useful, for example, in a situatio where you have a
+group of similar states (such as MeleeAttacking and RangeAttacking) which have a lot of
+functionality in common. In this case you could declare a base Attacking state as follows:</p>
+</font>
+
+<pre><small>// Base Attacking state.
+state Attacking
+{
+	// Stick base functions here...
+} 
+&nbsp;
+// Attacking up-close.
+state MeleeAttacking expands Attacking
+{
+	// Stick specialized functions here...
+} 
+&nbsp;
+// Attacking from a distance.
+state RangeAttacking expands Attacking
+{
+	// Stick specialized functions here...
+} </small></pre>
+
+<p><small>A state can optionally use the &quot;ignores&quot; specifier to ignore functions
+while in a state. The syntax for this is:</small></p>
+
+<pre><small>// Declare a state.
+state Retreating
+{
+	// Ignore the following messages...
+	ignores Touch, UnTouch, MyFunction;
+&nbsp;
+	// Stick functions here...
+}</small></pre>
+<font size="2">
+
+<p>You can tell what specific state an actor is in from its &quot;state&quot; variable, a
+variable of type &quot;name&quot;.</p>
+
+<p>It is possible for an actor to be in &quot;no state&quot; by using
+GotoState(&#145;&#146;). When an actor is in &quot;no state&quot;, only its global
+(non-state) functions are called.</p>
+
+<p>Whever you use the GotoState command to set an actor&#146;s state, the engine can call
+two special notification functions, if you have defined them: EndState() and BeginState().
+EndState is called in the current state immediately before the new state is begun, and
+BeginState is called immediately after the new state begins. These functions provide a
+convenient place to do any state-specific initialization and cleanup which your state may
+require.</p>
+</font><font face="Arial"><i><b>
+
+<p>Constants</p>
+</b></i></font><font size="2">
+
+<p>In UnrealScript, you can specify constant values of nearly all data types: 
+
+<ul>
+  <li>Integer and byte constants are specified with simple numbers, for example: 123 </li>
+  <li>If you must specify an integer or byte constant in hexidecimal format, use i.e.: 0x123 </li>
+  <li>Floating point constants are specified with decimal numbers like: 456.789 </li>
+  <li>String constants must be enclosed in double quotes, for example: &quot;MyString&quot; </li>
+  <li>Name constants must be enclosed in single quotes, for example &#145;MyName&#146; </li>
+  <li>Vector constants contain X, Y, and Z values like this: Vect(1.0,2.0,4.0) </li>
+  <li>Rotation constants contant Pitch, Yaw, and Roll values like this: Rot(0x8000,0x4000,0) </li>
+  <li>The &quot;None&quot; constant refers to &quot;no object&quot; (or equivalantly, &quot;no
+    actor&quot;). </li>
+  <li>The &quot;Self&quot; constant refers to &quot;this object&quot; (or equivalantly,
+    &quot;this actor&quot;), i.e. the object whose script is executing. </li>
+  <li>General object constants are specified by the object type followed by the object name in
+    single quotes, for example: texture &#145;Default&#146; </li>
+  <li>EnumCount gives you the number of elements in an enumeration, for example:
+    EnumCount(ELightType) </li>
+  <li>ArrayCount gives you the number of elements in an array, for example:
+    ArrayCount(Touching)</li>
+</ul>
+
+<p>You can use the &quot;const&quot; keyword to declare constants which you can later
+refer to by name.&nbsp; For example:</p>
+</font>
+
+<pre><small>const LargeNumber=123456;
+const PI=3.14159;
+const MyName=&quot;Tim&quot;;
+const Northeast=Vect(1.0,1.0,0.0);</small></pre>
+<font size="2">
+
+<p>Constants can be defined within classes or within structs.</p>
+</font>
+
+<p><font size="2">To access a constant which was declared in another class, use the
+&quot;classname.constname&quot; syntax, for example:</font></p>
+
+<pre><small>Pawn.LargeNumber</small></pre>
+<font face="Arial"><i><b>
+
+<p>Expressions</p>
+</b></i></font><font size="2">
+
+<p>To assign a value to a variable, use &quot;=&quot; like this:</p>
+</font>
+
+<pre><small>function Test()
+{
+	local int i;
+	local string[80] s;
+	local vector v, q;
+&nbsp;
+	i = 10; // Assign a value to integer variable i.
+	s = &quot;Hello!&quot;; // Assign a value to string variable s.
+	v = q; // Copy value of vector q to v.
+}</small></pre>
+<font size="2">
+
+<p>In UnrealScript, whenever a function or other expression requires a certain type of
+data (for example, an &quot;float&quot;), and you specify a different type of data (for
+example, an &quot;int), the compiler will try to convert the value you give to the proper
+type. Conversions among all the numerical data types (byte, int, and float) happen
+automatically, without any work on your part.</p>
+
+<p>UnrealScript is also able to many other built-in data types to other types, if you
+explicitly convert them in code. The syntax for this is:</p>
+</font>
+
+<pre><small>function Test()
+{
+	local int i;
+	local string[80] s;
+	local vector v, q;
+	local rotation r;
+&nbsp;
+	s = string(i); // Convert integer i to a string, and assign it to s.
+	s = string(v); // Convert vector v to a string, and assign it to s.
+	v = q + vector(r); // Convert rotation r to a vector, and add q.
+}</small></pre>
+<font size="2">
+
+<p>Here is the complete set of non-automatic conversions you can use in UnrealScript: 
+
+<ul>
+  <b>
+  <li>String to Byte, Int, Float:</b> Tries to convert a string like &quot;123&quot; to a
+    value like 123. If the string doesn&#146;t represent a value, the result is 0. </li>
+  <b>
+  <li>Byte, Int, Float, Vector, Rotation to String:</b> Converts the number to its textual
+    representation. </li>
+  <b>
+  <li>String to Vector, Rotation:</b> Tries to parse the vector or rotation&#146;s textual
+    representation. </li>
+  <b>
+  <li>String to Bool:</b> Converts the case-insensitive words &quot;True&quot; or
+    &quot;False&quot; to True and False; converts any non-zero value to True; everything else
+    is False. </li>
+  <b>
+  <li>Bool to String:</b> Result is either &quot;True&quot; or &quot;False&quot;. </li>
+  <b>
+  <li>Byte, Int, Float, Vector, Rotation to Bool:</b> Converts nonzero values to True; zero
+    values to False. </li>
+  <b>
+  <li>Bool to Byte, Int, Float:</b> Converts True to 1; False to 0. </li>
+  <b>
+  <li>Name to String:</b> Converts the name to the text equivalant. </li>
+  <b>
+  <li>Rotation to Vector:</b> Returns a vector facing &quot;forward&quot; according to the
+    rotation. </li>
+  <b>
+  <li>Vector to Rotation:</b> Returns a rotation pitching and yawing in the direction of the
+    vector; roll is zero. </li>
+  <b>
+  <li>Object (or Actor) to Int:</b> Returns an integer that is guaranteed unique for that
+    object. </li>
+  <b>
+  <li>Object (or Actor) to Bool:</b> Returns False if the object is None; False otherwise. </li>
+  <b>
+  <li>Object (or Actor) to String:</b> Returns a textual representation of the object.</li>
+</ul>
+</font><font face="Arial"><i><b>
+
+<p>Converting among Actor and Object classes</p>
+</b></i></font><font size="2">
+
+<p>Just like the conversion functions above, which convert among simple datatypes, in
+UnrealScript you can convert actor and object references among various types. For example,
+all actors have a variable named &quot;Target&quot;, which is a reference to another
+actor. Say you are writing a script where you need to check and see if your Target belongs
+to the &quot;Pawn&quot; actor class, and you need to do something special with your target
+that only makes sense when it&#146;s a pawn -- for example, you need to call one of the
+Pawn functions. The actor cast operators let you do this. Here&#146;s an example:</p>
+</font>
+
+<pre><small>var actor Target;
+//...
+&nbsp;
+function TestActorConversions()
+{
+	local Pawn P;
+&nbsp;
+	// See if my target is a Pawn.
+	P = Pawn(Target);
+	if( P != None )
+	{
+		// Target is a pawn, so set its Enemy to Self.
+		P.Enemy = Self;
+	}
+	else
+	{
+		// Target is not a pawn.
+	}
+}</small></pre>
+<font size="2">
+
+<p>To perform an actor conversion, type the class name followed by the actor expression
+you wish to convert, in parenthesis. Such a conversion will either succeed or fail based
+on whether the conversion is sensible. In the above example, if your Target is referencing
+a Trigger object rather than a pawn, the expression Pawn(Target) will return
+&quot;None&quot;, since a Trigger can&#146;t be converted to a Pawn. However, if your
+Target is referencing a Brute object, the conversion will successfully return the Brute,
+because Brute is a subclass of Pawn.</p>
+
+<p>Thus, actor conversions have two purposes: First, you can use them to see if a certain
+actor reference belongs to a certain class. Second, you can use them to convert an actor
+reference from one class to a more specific class. Note that these conversions don&#146;t
+affect the actor you&#146;re converting at all -- they just enable UnrealScript to treat
+the actor reference as if it were a more specific type.</p>
+
+<p>Another example of conversions lies in the Inventory script. Each Inventory actor is
+owned by a Pawn, even though its Owner variable can refer to any Actor. So a common theme
+in the Inventory code is to cast Owner to a Pawn, for example:</p>
+</font>
+
+<pre><small>// Called by engine when destroyed.
+function Destroyed()
+{
+	// Remove from owner's inventory.
+	if( Pawn(Owner)!=None )
+		Pawn(Owner).DeleteInventory( Self );
+}&nbsp;</small></pre>
+<font face="Arial"><i><b>
+
+<p>Built-in operators and their precedence</p>
+</b></i></font><font size="2">
+
+<p>UnrealScript provides a wide variety of C/C++/Java-style operators for such operations
+as adding numbers together, comaring values, and incrementing variables. The complete set
+of operators is defined in Object.u, but here is a recap. Here are the standard operators,
+in order of precedence.&nbsp; Note that all of the C style operators have the same
+precedence as they do in C.</p>
+</font>
+
+<table border="1" cellspacing="1" bordercolor="#000000" cellpadding="7" width="637">
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">Operator</font></td>
+    <td width="36%" valign="TOP"><font size="2">Types it applies to</font></td>
+    <td width="51%" valign="TOP"><font size="2">Meaning</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">$</font></td>
+    <td width="36%" valign="TOP"><font size="2">string</font></td>
+    <td width="51%" valign="TOP"><font size="2">String concatenation</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">*=</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, vector, rotation</font></td>
+    <td width="51%" valign="TOP"><font size="2">Multiply and assign</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">/=</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, vector, rotation</font></td>
+    <td width="51%" valign="TOP"><font size="2">Divide and assign</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">+=</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, vector</font></td>
+    <td width="51%" valign="TOP"><font size="2">Add and assign</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">-=</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, vector</font></td>
+    <td width="51%" valign="TOP"><font size="2">Subtract and assign</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">||</font></td>
+    <td width="36%" valign="TOP"><font size="2">bool</font></td>
+    <td width="51%" valign="TOP"><font size="2">Logical or</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">&amp;&amp;</font></td>
+    <td width="36%" valign="TOP"><font size="2">bool</font></td>
+    <td width="51%" valign="TOP"><font size="2">Logical and</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">&amp;</font></td>
+    <td width="36%" valign="TOP"><font size="2">int</font></td>
+    <td width="51%" valign="TOP"><font size="2">Bitwise and</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">|</font></td>
+    <td width="36%" valign="TOP"><font size="2">int</font></td>
+    <td width="51%" valign="TOP"><font size="2">Bitwise or</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">^</font></td>
+    <td width="36%" valign="TOP"><font size="2">int</font></td>
+    <td width="51%" valign="TOP"><font size="2">Bitwise exlusive or</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">!=</font></td>
+    <td width="36%" valign="TOP"><font size="2">All</font></td>
+    <td width="51%" valign="TOP"><font size="2">Compare for inequality</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">==</font></td>
+    <td width="36%" valign="TOP"><font size="2">All</font></td>
+    <td width="51%" valign="TOP"><font size="2">Compare for equality</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">&lt;</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, string</font></td>
+    <td width="51%" valign="TOP"><font size="2">Less than</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">&gt;</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, string</font></td>
+    <td width="51%" valign="TOP"><font size="2">Greater than</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">&lt;=</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, string</font></td>
+    <td width="51%" valign="TOP"><font size="2">Less than or equal to</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">&gt;=</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, string</font></td>
+    <td width="51%" valign="TOP"><font size="2">Greater than or equal to</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">~=</font></td>
+    <td width="36%" valign="TOP"><font size="2">float, string</font></td>
+    <td width="51%" valign="TOP"><font size="2">Approximate equality (within 0.0001),
+    case-insensitive equality.</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">&lt;&lt;</font></td>
+    <td width="36%" valign="TOP"><font size="2">int, vector</font></td>
+    <td width="51%" valign="TOP"><font size="2">Left shift (int), Forward vector
+    transformation (vector)</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">&gt;&gt;</font></td>
+    <td width="36%" valign="TOP"><font size="2">int, vector</font></td>
+    <td width="51%" valign="TOP"><font size="2">Right shift (int), Reverse vector
+    transformation (vector)</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">+</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, vector</font></td>
+    <td width="51%" valign="TOP"><font size="2">Add</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">-</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, vector</font></td>
+    <td width="51%" valign="TOP"><font size="2">Subtract</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">%</font></td>
+    <td width="36%" valign="TOP"><font size="2">float</font></td>
+    <td width="51%" valign="TOP"><font size="2">Modulo (remainder after division)</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">*</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, vector, rotation</font></td>
+    <td width="51%" valign="TOP"><font size="2">Multiply</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">/</font></td>
+    <td width="36%" valign="TOP"><font size="2">byte, int, float, vector, rotation</font></td>
+    <td width="51%" valign="TOP"><font size="2">Divide</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">Dot</font></td>
+    <td width="36%" valign="TOP"><font size="2">vector</font></td>
+    <td width="51%" valign="TOP"><font size="2">Vector dot product</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">Cross</font></td>
+    <td width="36%" valign="TOP"><font size="2">vector</font></td>
+    <td width="51%" valign="TOP"><font size="2">Vector cross product</font></td>
+  </tr>
+  <tr>
+    <td width="13%" valign="TOP"><font size="2">**</font></td>
+    <td width="36%" valign="TOP"><font size="2">float</font></td>
+    <td width="51%" valign="TOP"><font size="2">Exponentiation</font></td>
+  </tr>
+</table>
+<font size="2">
+
+<p>The above table lists the operators in order of precedence (with operators of the same
+precedence grouped together). When you type in a complex expression like
+&quot;1*2+3*4&quot;, UnrealScript automatically groups the operators by precedence. Since
+multiplication has a higher precedence than addition, the expression is evaluated as
+&quot;(1*2)+(3*4)&quot;.</p>
+
+<p>The &quot;&amp;&amp;&quot; (logical and) and &quot;||&quot; (logical or) operators are
+short-circuited: if the result of the expression can be determined solely from the first
+expression (for example, if the first argument of &amp;&amp; is false), the second
+expression is not evaluated.</p>
+
+<p>In addition, UnrealScript supports the following unary operators: 
+
+<ul>
+  <b>
+  <li>!</b> (bool) Logical not. </li>
+  <b>
+  <li>-</b> (int, float) negation. </li>
+  <b>
+  <li>~</b> (int) bitwise negation. </li>
+  <b>
+  <li>++</b>, <b>--</b> Decrement (either before or after a variable).</li>
+</ul>
+</font><font face="Arial"><i><b>
+
+<p>General purpose functions</p>
+</b></i></font><font size="2">
+
+<p>Integer functions: 
+
+<ul>
+  <b>
+  <li>int Rand( int Max );</b> Returns a random number from 0 to Max-1. </li>
+  <b>
+  <li>int Min( int A, int B );</b> Returns the minimum of the two numbers. </li>
+  <b>
+  <li>int Max( int A, int B );</b> Returns the maximum of the two numbers. </li>
+  <b>
+  <li>int Clamp( int V, int A, int B );</b> Returns the first number clamped to the interval
+    from A to B.</li>
+</ul>
+
+<p>Floating point functions: 
+
+<ul>
+  <b>
+  <li>float Abs( float A );</b> Returns the absolute value of the number. </li>
+  <b>
+  <li>float Sin( float A );</b> Returns the sine of the number expressed in radius. </li>
+  <b>
+  <li>float Cos( float A );</b> Returns the cosine of the number expressed in radians. </li>
+  <b>
+  <li>float Tan( float A );</b> Returns the tangent of the number expressed in radians. </li>
+  <b>
+  <li>float Atan( float A );</b> Returns the inverse tangent of the number expressed in
+    radians. </li>
+  <b>
+  <li>float Exp( float A );</b> Returns the constant &quot;e&quot; raised to the power of A. </li>
+  <b>
+  <li>float Loge( float A );</b> Returns the log (to the base &quot;e&quot;) of A. </li>
+  <b>
+  <li>float Sqrt( float A );</b> Returns the square root of A. </li>
+  <b>
+  <li>float Square( float A );</b> Returns the square of A = A*A. </li>
+  <b>
+  <li>float FRand();</b> Returns a random number from 0.0 to 1.0. </li>
+  <b>
+  <li>float FMin( float A, float B );</b> Returns the minimum of two numbers. </li>
+  <b>
+  <li>float FMax( float A, float B );</b> Returns the maximum of two numbers. </li>
+  <b>
+  <li>float FClamp( float V, float A, float B );</b> Returns the first number clamped to the
+    interval from A to B. </li>
+  <b>
+  <li>float Lerp( float Alpha, float A, float B );</b> Returns the linear interpolation
+    between A and B. </li>
+  <b>
+  <li>float Smerp( float Alpha, float A, float B );</b> Returns an Alpha-smooth nonlinear
+    interpolation between A and B.</li>
+</ul>
+
+<p>Unreal&#146;s string functions have a distinct Basic look and feel: 
+
+<ul>
+  <b>
+  <li>int Len( coerce string[255] S );</b> Returns the length of a string. </li>
+  <b>
+  <li>int InStr( coerce string[255] S, coerce string[255] t);</b> Returns the offset into the
+    first string of the second string if it exists, or -1 if not. </li>
+  <b>
+  <li>string[255] Mid ( coerce string[255] S, int i, optional int j );</b> Returns the middle
+    part of the string S, starting and character i and including j characters (or all of them
+    if j is not specified). </li>
+  <b>
+  <li>string[255] Left ( coerce string[255] S, int i );</b> Returns the i leftmost characters
+    of s. </li>
+  <b>
+  <li>string[255] Right ( coerce string[255] S, int i );</b> Returns the i rightmost
+    characters of s. </li>
+  <b>
+  <li>string[255] Caps ( coerce string[255] S );</b> Returns S converted to uppercase.</li>
+</ul>
+
+<p>Vector functions: 
+
+<ul>
+  <li><font size="2"><b>float Size( vector A );</b> Returns the euclidean size of the vector
+    (the square root of the sum of the components squared).</font></li>
+  <font size="2">
+  <li><font size="2"><b>vector Normal( vector A );</b> Returns a vector of size 1.0, facing in
+    the direction of the specified vector.</font></li>
+  <li><font size="2"><b>Invert ( out vector X, out vector Y, out vector Z );</b> Inverts a
+    coordinate system specified by three axis vectors.</font></li>
+  <li><font size="2"><b>vector VRand ( );</b> Returns a uniformly distributed random vector.</font></li>
+  <li><font size="2"><b>float Dist ( vector A, vector B );</b> Returns the euclidean distance
+    between two points.</font></li>
+  <li><font size="2"><b>vector MirrorVectorByNormal( vector Vect, vector Normal );</b> Mirrors
+    a vector about a specified normal vector.</font></li>
+  </font>
+</ul>
+</font><font face="Arial"><i><b>
+
+<p>ForEach and iterator functions</p>
+</b></i></font><font size="2">
+
+<p>UnrealScript&#146;s &quot;foreach&quot; command makes it easy to deal with large groups
+of actors, for example all of the actors in a level, or all of the actors within a certain
+distance of another actor. &quot;foreach&quot; works in conjunction with a special kind of
+function called an &quot;iterator&quot; function whose purpose is to iterate through a
+list of actors.</p>
+
+<p>Here is a simple example of foreach:</p>
+</font>
+
+<pre><small>// Display a list of all lights in the level.
+function Something()
+{
+	local actor A;
+&nbsp;
+	// Go through all actors in the level.
+	log( &quot;Lights:&quot; );
+	foreach AllActors( class &#145;Actor&#146;, A )
+	{
+		if( A.LightType != LT_None )
+			log( A );
+	}
+}</small></pre>
+<font size="2">
+
+<p>The first parameter in all &quot;foreach&quot; commands is a constant class, which
+specifies what kinds of actors to search. You can use this to limit the search to, for
+example, all Pawns only.</p>
+
+<p>The second parameter in all &quot;foreach&quot; commands is a variable which is
+assigned an actor on each iteration through the &quot;foreach&quot; loop.</p>
+
+<p>Here are all of the iterator functions which work with &quot;foreach&quot;. 
+
+<ol>
+  <b>
+  <li>AllActors ( class BaseClass, out actor Actor, optional name MatchTag );</b> Iterates
+    through all actors in the level. If you specify an optional MatchTag, only includes actors
+    which have a &quot;Tag&quot; variable matching the tag you specified.</li>
+  <b>
+  <li>ChildActors( class BaseClass, out actor Actor );</b> Iterates through all actors owned
+    by this actor.</li>
+  <b>
+  <li>BasedActors( class BaseClass, out actor Actor );</b> Iterates throgh all actors which
+    are standing on this actor.</li>
+  <b>
+  <li>TouchingActors( class BaseClass, out actor Actor );</b> Iterates through all actors
+    which are touching (interpenetrating) this actor.</li>
+  <b>
+  <li>TraceActors( class BaseClass, out actor Actor, out vector HitLoc, out vector HitNorm,
+    vector End, optional vector Start, optional vector Extent );</b> Iterates through all
+    actors which touch a line traced from the Start point to the End point, using a box of
+    collision extent Extent. On each iteration, HitLoc is set to the hit location, and HitNorm
+    is set to an outward-pointing hit normal.</li>
+  <b>
+  <li>RadiusActors( class BaseClass, out actor Actor, float Radius, optional vector Loc );</b>
+    Iterates through all actors within a specified radius of the specified location (or if
+    none is specified, this actor&#146;s location).</li>
+  <b>
+  <li>VisibleActors( class BaseClass, out actor Actor, optional float Radius, optional vector
+    Loc );</b> Iterates through a list of all actors who are visible to the specified location
+    (or if no location is specified, this actor&#146;s location).</li>
+</ol>
+</font><b><font face="Arial"><i>
+
+<p>Advanced language features 
+
+<ul>
+  </i></font><font size="2">
+  <li>Accessing default values of variables: </b>UnrealEd enables level designers to edit the
+    &quot;default&quot; variables of an object's class. When a new actor is spawned of the
+    class, all of its variables are initialized to those defaults. Sometimes, it&#146;s useful
+    to manually reset a variable to its default value. For example, when the player drops an
+    inventory item, the inventory code needs to reset some of the actor&#146;s values to its
+    defaults. In UnrealScript, you can access the default variables of a class with the
+    &quot;Default.&quot; keyword. For example:</li>
+</ul>
+</font>
+
+<pre><small>var() float Health, Stamina;
+//...
+&nbsp;
+// Reset some variables to their defaults.
+function ResetToDefaults()
+{
+	// Reset health, and stamina.
+	Health = Default.Health;
+	Stamina = Default.Stamina;
+}</small></pre>
+
+<ul>
+  <li><font size="2"><strong>Accessing default values of variables in a variable class:</strong>
+    If you have a class reference (a variable of &quot;class&quot; or
+    &quot;class&lt;classlimitor&gt;&quot; type), you can access the default properties of the
+    class it references, without having an object of that class. This syntax works with any
+    expression that evaluates to class type.</font></li>
+</ul>
+
+<pre><small>var class C;</small>
+<small>var class&lt;Pawn&gt; PC;</small>
+<small>Health = class'Spotlight'.default.LightBrightness; // Access the default value of LightBrightness in the Spotlight class. </small>
+<small>Health = PC.default.Health; // Access the default value of Health in a variable class identified by PC.</small>
+<small>Health = class&lt;Pawn&gt;(C).default.Health; // Access the default value of Health in a casted class expression.</small></pre>
+
+<ul>
+  <li><font size="2"><strong>Accessing static functions in a variable class:</strong> Static
+    functions in a variable class may be called using the following syntax.</font></li>
+</ul>
+
+<pre><small>var class C;</small>
+<small>var class&lt;Pawn&gt; PC;</small>
+<small>class'SkaarjTrooper'.static.SomeFunction(); // Call a static function in a specific class.</small>
+<small>PC.static.SomeFunction(); // Call a static function in a variable class.</small>
+<small>class&lt;Pawn&gt;(C).static.SomeFunction(); // Call a static function in a casted class expression.</small></pre>
+
+<h2><small>UnrealScript binary compatibility issues</small></h2>
+
+<p><small>UnrealScript is designed so that classes in package files may evolve over time
+without breaking binary compatibility.&nbsp; Here, binary compatibility means
+&quot;dependent binary files may be loaded and linked without error&quot;; whether your
+modified code functions as designed is a separate issue.&nbsp; on the&nbsp; Specifically,
+the kinds of modifications when may be made safely are as follows:</small> 
+
+<ul>
+  <li><small>The .uc script files in a package may be recompiled without breaking binary
+    compatibility.</small></li>
+  <li><small>Adding new classes to a package.</small></li>
+  <li><small>Adding new functions to a class.</small></li>
+  <li><small>Adding new states to a class.</small></li>
+  <li><small>Adding new variables to a class.</small></li>
+  <li><small>Removing private variables from a class.</small></li>
+</ul>
+
+<p><small>Other transformations are generally unsafe, including (but not limited to):</small>
+
+<ul>
+  <li><small>Adding new members to a struct.</small></li>
+  <li><small>Removing a class from a package.</small></li>
+  <li><small>Changing the type of any variable, function parameter, or return value.</small></li>
+  <li><small>Changing the number of parameters in a function.</small></li>
+</ul>
+<i><b>
+
+<h3></b></i>Technical notes<b><i></h3>
+</i><font size="2">
+
+<p>Garbage collection:</b> All objects and actors in Unreal are garbage-collected using a
+tree-following garbage collector similar to that of the Java VM. The Unreal garbage
+collector uses the UObject class&#146;s serialization functionality to recursively figure
+out which other objects are referenced by each active object. As a result, object need not
+be explicitly deleted, because the garbage collector will eventually hunt them down when
+they become unreferenced. This approach has the side-effect of latent deletion of
+unreferenced objects; however it is far more efficient than reference counting in the case
+of infrequent deletion.</p>
+<b>
+
+<p>Unreal COM integration:</b> Unreal&#146;s base UObject class derives from IUnknown in
+anticipation of making Unreal interoperable with the Component Object Model without
+requiring binary changes to objects. However, Unreal is not COM-aware at the moment and
+the benefits of integrating Unreal with COM are not yet clear, so this project is on
+indefinite hold.</p>
+<b>
+
+<p>UnrealScript is bytecode based:</b> UnrealScript code is compiled into a series of
+bytecodes similar to p-code or the Java bytecodes. This makes UnrealScript
+platform-neutral; this porting the client and server components of Unreal to other
+platforms, i.e. the Macintosh or Unix, is straightforward, and all versions can
+interoperate easily by executing the same scripts.</p>
+<b>
+
+<p>Unreal as a Virtual Machine: </b>The Unreal engine can be regarded as a virtual machine
+for 3D gaming in the same way that the Java language and the built-in Java class hierarchy
+define a virtual machine for Web page scripting. The Unreal virtual machine is inherently
+portable (due to splitting out all platform-dependent code in separate modules) and
+expandable (due to the expandable class hierarchy). However, at this time, there are no
+plans to document the Unreal VM to the extent necessary for others to create independent
+but compatible implementations.</p>
+<b>
+
+<p>The UnrealScript compiler is two-pass:</b> Unlike C++, UnrealScript is compiled in two
+distinct passes. In the first pass, variable, state and function definitions are parsed
+and remembered. In the second pass, the script code is compiled to byte codes. This
+enables complex script hierarchies with circular dependencies to be completely compiled
+and linked in two passes, without a separate link phase.</p>
+<b>
+
+<p>Persistent actor state:</b> It is important to note that in Unreal, because the user
+can save the game at any time, the state of all actors, including their script execution
+state, can be saved at any time where all actors are at their lowest possible stack level.
+This persistence requirement is the reason behind the limitation that latent functions may
+only be called from state code: state code executes at the lowest possible stack level,
+and thus can be serialized easily. Function code may exist at any stack level, and could
+have (for example) C++ intrinsic functions below it on the stack, which is clearly not a
+situation which one could save on disk and later restore.</p>
+<b>
+
+<p>Unrealfiles:</b> Unrealfiles are Unreal&#146;s native binary file format. Unrealfiles
+contain an index, serialized dump of the objects in a particular Unreal package.
+Unrealfiles are similar to DLL&#146;s, in that they can contain references to other
+objects stored in other Unrealfiles. This approach makes it possible to distribute Unreal
+content in predefined &quot;packages&quot; on the Internet, in order to reduce download
+time (by never downloading a particular package more than once).</p>
+</font>
+
+<p><font size="2"><strong>Why UnrealScript does not support static variables:</strong>
+While C++ supports static (per class-process) variables for good reasons true to the
+language's low-level roots, and Java support static variables for reasons that appear to
+be not well thought out, such variables do not have a place in UnrealScript because of
+ambiguities over their scope with respect to serialization, derivation, and multiple
+levels: should static variables have &quot;global&quot; semantics, meaning that all static
+variables in all active Unreal levels have the same value? Should they be per package?
+Should they be per level? If so, how are they serialized -- with the class in its .u file,
+or with the level in its .unr file? Are they unique per base class, or do derived versions
+of classes have their own values of static variables? In UnrealScript, we sidestep the
+problem by not defining static variables as a language feature, and leaving it up to
+programmers to manage static-like and global-like variables by creating classes to contain
+them and exposing them in actual objects. If you want to have variables that are
+accessible per-level, you can create a new class to contain those variables and assure
+they are serialized with the level. This way, there is no ambiguity. For examples of
+classes that serve this kind of purpose, see LevelInfo and GameInfo.</font></p>
+<font face="Arial" size="2"><i><b>
+
+<p>UnrealScript programming strategy</p>
+</b></i></font><font size="2">
+
+<p>Here I want to cover a few topics on how to write UnrealScript code effectively, and
+take advantage of UnrealScript&#146;s strengths while avoiding the pitfalls. 
+
+<ul>
+  <li>UnrealScript is a slow language compared to C/C++. A typical C++ program runs at about
+    50 million base language instructions per second, while UnrealScript runs at about 2.5
+    million - a 20X performance hit. The programming philosophy behind all of our own script
+    writing is this: Write scripts that are almost always idle. In other words, use
+    UnrealScript only to handle the &quot;interesting&quot; events that you want to customize,
+    not the rote tasks, like basic movement, which Unreal&#146;s physics code can handle for
+    you. For example, when writing a projectile script, you typically write a HitWall(),
+    Bounce(), and Touch() function describing what to do when key events happen. Thus 95% of
+    the time, your projectile script isn&#146;t executing any code, and is just waiting for
+    the physics code to notify it of an event. This is inherently very efficient. In our
+    typical level, even though UnrealScript is comparably much slower than C++, UnrealScript
+    execution time averages 5-10% of CPU time. </li>
+  <li>Exploit latent functions (like FinishAnim and Sleep) as much as possible. By basing the
+    flow of your script execution on them, you are creating animation-driven or time-driven
+    code, which is fairy efficient in UnrealScript. </li>
+  <li>Keep an eye on the Unreal log while you&#146;re testing your scripts. The UnrealScript
+    runtime often generates useful warnings in the log that notify you of nonfatal problems
+    that are occuring. </li>
+  <li>Be wary of code that can cause infinite recursion. For example, the &quot;Move&quot;
+    command moves the actor and calls your Bump() function if you hit something. Therefore, if
+    you use a Move command within a Bump function, you run the risk of recursing forever. Be
+    careful. Infinite recursion and infinite looping are the two error conditions which
+    UnrealScript doesn&#146;t handle gracefully. </li>
+  <li>Spawning and destroying actors are fairly expensive operations on the server side, and
+    are even more expensive in network games, because spawns and destroys take up network
+    bandwidth. Use them reasonably, and regard actors as &quot;heavy weight&quot; objects. For
+    example, do not try to create a particle system by spawning 100 unique actors and sending
+    them off on different trajectories using the physics code. That will be sloooow. </li>
+  <li>Exploit UnrealScript&#146;s object-oriented capabilities as much as possible. Creating
+    new functionality by overriding existing functions and states leads to clean code that is
+    easy to modify and easy to integrate with other peoples&#146; work. Avoid using
+    traditional C techniques, like doing a switch() statement based on the class of an actor
+    or the state, because code like this tends to break as you add new classes and modify
+    things.</li>
+</ul>
+</font><font face="Arial" size="2"><i><b>
+
+<p>Topics to be documented later, maybe</p>
+</b></i></font><font size="2">
+
+<p>Unreal specific functions</p>
+
+<p>Explain probes, Disable, Enable</p>
+
+<p>Debugging</p>
+
+<p>Logging</p>
+
+<p>Assert</p>
+
+<p>Object related</p>
+
+<p>Animation</p>
+
+<p>Actor related</p>
+
+<p>Spawn</p>
+
+<p>Destroy, describe latency issues</p>
+
+<p>String</p>
+
+<p>Explain concatenation operator</p>
+
+<p>Physics</p>
+
+<p>AI </p>
+
+<p><font size="2">Inventory</font></p>
+
+<p>Preprocessor</p>
+
+<p>#exec</p>
+
+<p>#alwaysexec</p>
+
+<p>Mesh commands</p>
+
+<p>Texture commands</p>
+
+<p>Sound commands</p>
+
+<p>Licensee dev / distribution models</p>
+
+<p>Whether or not to retain binary compatibility with Unreal/UnrealEd</p>
+</font>
+</body>
+</html>
