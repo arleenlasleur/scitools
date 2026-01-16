@@ -49,7 +49,7 @@ var bool ena_laser;
 var trigger sens_trig;               // sensed trigger for controlling
 var mover sens_mov;                  // sensed mover for controlling
 var bool ena_prod;                   // execute prod sequence if true
-
+var ams_shield shield;
 // ============================================================================================================
 // CALIBRATION DATA. Added to eliminate magicnumbers from code.
 // ============================================================================================================
@@ -200,23 +200,26 @@ function hlp(){
 function tick(float f){
    local vector hl,hn, x,y,z;
    local rotator r;
-//   local float lasermult, laserdist;
-//   local vector laserorigin;
+// local float lasermult, laserdist;
+// local vector laserorigin;
    local pawn p;
    if(owner == none) return;
    p = pawn(owner);
    if(p == none) return;
    p.health = user_hold_health;                       // prevent drown death
    if(p.velocity.z <= -900) p.velocity.z = -900;      // prevent fall death
+//   if(shield != none) shield.setlocation(p.location); // prevent proj damage   // removed. cause rays obstacle
+// todo autokill pawns instead
+
    pw_sens_fire = (p.bFire!=0);
    accumulated_pw_sens_fire += f;
    if(!pw_sens_fire) accumulated_pw_sens_fire = 0;
 
    getaxes(p.viewrotation,x,y,z);
    if(ena_laser){
-      trace(hl,hn,p.location + 10000*x,p.location,true);
+      trace(hl,hn,p.location + 1280*x,p.location,true);
       z.z = hl.z;
-      if(rotator(hn).pitch <= anti_artifacts_maxslope) hl += hn*wall_dist;
+   /* if(rotator(hn).pitch <= anti_artifacts_maxslope) */ hl += hn*wall_dist; // 2026-01-16: offset laser off all surfs, not walls only
       hl.z = z.z;
       laserdot.setlocation(hl);
    }
@@ -735,10 +738,10 @@ function postbeginplay(){
    foreach allactors(class'trigger',t){
       t.group='';
       t.bTriggerOnceOnly = false;               // force enable
-      if(t.TriggerType == TT_PlayerProximity){
+//      if(t.TriggerType == TT_PlayerProximity){   // 2026-01-16: now always execute this
          t.TriggerType = TT_ClassProximity;     // prohibit autotrigger
          t.ClassProximityType = class'ams_dummy_proxclass';
-      }
+//      }
       t.RepeatTriggerTime = 0.0;                // normalize toggling stuff
       t.RetriggerDelay = 0.2;
       t.GotoState('NormalTrigger');
@@ -750,7 +753,18 @@ function postbeginplay(){
    }
    lightbeam = spawn(class'STLight',,,vect(32767,32767,32767));
    laserdot = spawn(class'STLaser',,,vect(32767,32767,32767));
-   saveconfig();
+   shield = spawn(class'ams_shield',,,vect(32767,32767,32767));
+   do_diag_z();            // initial diag pass
+   mode_player = 3;        // restore to convenient defaults
+   mode_all_layers = 3;
+// mode_mwheel = 2; already 2
+   ena_2xzoom = true;
+   ena_4xzoom = false;
+   shr_div_coords = 2;
+   upd_resolution();
+   ena_lockz = true;
+   ena_lockoffset = true;
+// saveconfig();
    resetconfig();
 }
 
