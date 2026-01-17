@@ -755,6 +755,9 @@ function postbeginplay(){
    laserdot = spawn(class'STLaser',,,vect(32767,32767,32767));
    shield = spawn(class'ams_shield',,,vect(32767,32767,32767));
    do_diag_z();            // initial diag pass
+   new_clientmsg[0] = "";
+   new_clientmsg[1] = "";
+   clientmsg_timer = 0.0;
    mode_player = 3;        // restore to convenient defaults
    mode_all_layers = 3;
 // mode_mwheel = 2; already 2
@@ -959,6 +962,7 @@ function do_diag_z(){
     mode_player = 0;          // reset interface to grab-ready // todo reset zooms
     mode_all_layers = 0;
     mode_mwheel = 2;
+    ena_laser = false;
     ena_2xzoom = false;
     ena_4xzoom = false;
     shr_div_coords = 4;
