@@ -1,4 +1,11 @@
 class areamapscan extends weapon config(scitools);
+// todo laser mode 2:
+// 0: off
+// 1: infinite laser, walldist specify end
+// 2: finite laser, walldist(use another variable) specify length
+// UI: show laser location, instead of Mod state XYL
+// where to show ModXYL: highlight certain globaloffset with green
+
 #exec texture import file="textures\scipixel.png"    name="scipixel"    package="scitools" mips=1 flags=0 btc=-2
 #exec texture import file="textures\scipixelblk.png" name="scipixelblk" package="scitools" mips=1 flags=0 btc=-2
 #exec texture import file="textures\scinoblk.png"    name="scinoblk"    package="scitools" mips=1 flags=0 btc=-2
@@ -48,12 +55,13 @@ var STLaser laserdot;                // laser blast
 var bool ena_laser;
 var trigger sens_trig;               // sensed trigger for controlling
 var mover sens_mov;                  // sensed mover for controlling
+var bool sens_ignore;
 var bool ena_prod;                   // execute prod sequence if true
 var ams_shield shield;
 // ============================================================================================================
 // CALIBRATION DATA. Added to eliminate magicnumbers from code.
 // ============================================================================================================
-const user_hold_health = 200;         // user hp
+const user_hold_health = 500;         // user hp
 const searchlight_direction = 4096;   // horz pitch to rotate
 const hud_maptex_offset_x = 685;      // coords of texture top left, relative to canvas top left
 const hud_maptex_offset_y = 30; 
@@ -223,8 +231,14 @@ function tick(float f){
       hl.z = z.z;
       laserdot.setlocation(hl);
    }
-   if(ena_laser) sens_mov = mover(trace(hl,hn,p.location + 10000*x,p.location,true));
-    else sens_trig = FindTrigger(p.location);
+   if(ena_laser){
+      sens_mov = mover(trace(hl,hn,p.location + 10000*x,p.location,true));     // set mover if checks passed
+      sens_ignore = sens_mov.group == 'sciignore';
+      sens_trig = none;
+   }else{
+      sens_trig = FindTrigger(p.location);
+      sens_mov = none;
+   }
 
 /* laserorigin = p.location;
    getaxes(p.viewrotation,x,y,z);
@@ -284,6 +298,7 @@ function sci_scripted_dpn_spawn(vector l){
 // switchable classic/narrow mode
 
 function postrender(canvas c){
+   local actor rtarg;
    local vector x,y,z,endtrace,hl,hn;
    local string tmp_s;
    local rotator r;
@@ -350,7 +365,7 @@ function postrender(canvas c){
       while(r.yaw<65536){
          getaxes(r,x,y,z);
          endtrace = pn.location + 768.0*x;   // scan dist
-         trace(hl,hn,endtrace,pn.location,true);
+         rtarg = trace(hl,hn,endtrace,pn.location,true);
          hlx = (hl.x>>shr_div_coords);
          hly = (hl.y>>shr_div_coords);
          hlx += (size_tex>>1); hlx += (global_offset_x >> shr_div_coords);
@@ -378,7 +393,9 @@ function postrender(canvas c){
             pnz = 0.25;             // cancer code but safe to use pnz here
             if(ena_2xzoom) pnz = 0.5;
             if(ena_4xzoom) pnz = 1.0;
-            c.setpos(hlx,hly);  c.drawicon(texture'scipixel',pnz);
+            if(rtarg.group!='sciignore'){
+               c.setpos(hlx,hly);  c.drawicon(texture'scipixel',pnz);
+            }
          }
          if(mode_all_layers!=0) pnz = advance_ray_pos_std;   // assign rays density, full quality for mode 0 only
           else pnz = advance_ray_pos_full;
@@ -468,7 +485,7 @@ function postrender(canvas c){
     c.drawtile(texture'scipixel', 1920-1024-hud_maptex_offset_x, 1080, 0,0,4,4);
 // ---- main banner text -----------------------------------------------------
    c.drawcolor = makecolor(255,255,255);
-   c.setpos(10,10);  c.drawtext("CT map tool v. 0.3-2026-01-05 by Arleen");
+   c.setpos(10,10);  c.drawtext("CT map tool v. 0.3-2026-01-18 by Arleen");
    c.drawcolor = makecolor(128,128,128);
    c.setpos(10,39);  c.drawtext("System requirements: 1920x1080 @ 32bpp");
    c.setpos(10,68);  c.drawtext("user.ini\\hudscaler must be set to 1.0");
@@ -498,6 +515,9 @@ function postrender(canvas c){
    k = len(tmp_s);
    k *= 16;
    c.setpos(665-k, 120); c.drawtext(tmp_s);
+   if(sens_ignore){
+      c.setpos(553, 149); c.drawtext("Ignored");
+   }
 //-------------------------------------------
    c.drawcolor = makecolor(128,128,128);
    c.setpos(10,505); c.drawtext("Console cmds:     ,     ,     ,");
@@ -528,6 +548,7 @@ function postrender(canvas c){
    c.setpos(444,735); c.drawtext("<F>");
    c.setpos(444,764); c.drawtext("<V>");
    c.setpos(396,793); c.drawtext("<IJKL>");
+   c.setpos(444,822); c.drawtext("<M>");
 
    c.setpos(92, 851); c.drawtext("<Z>");
    c.setpos(244,851); c.drawtext("<X>");
@@ -583,6 +604,7 @@ function postrender(canvas c){
    c.setpos(476,706); c.drawtext("DPN:");
    c.setpos(500,735); c.drawtext("fall");
    c.setpos(500,764); c.drawtext("spawn");
+   c.setpos(500,822); c.drawtext("ignore");
 
    c.drawcolor = makecolor(255,255,155);
    c.setpos(124,822); c.drawtext("User:");
@@ -790,6 +812,7 @@ function playselect(){
    p.consolecommand("set input 8 tog_mode_texsize");
    p.consolecommand("set input 9 tog_shr_factor");
    p.consolecommand("set input backslash tog_mark_region");
+   p.consolecommand("set input m tog_ignore");
 // p.consolecommand("set input minus tog_dpn_fall");
 // p.consolecommand("set input equals tog_dpn_autospawn");
    p.consolecommand("set input f tog_dpn_fall");
@@ -811,9 +834,18 @@ exec function tog_laser(){
    ena_laser = !ena_laser;
    if(!ena_laser){
       laserdot.setlocation(vect(32767,32767,32767));
-      if(sens_mov != none) sens_mov = none; // forget mover
+      sens_mov = none;  // forget mover
    }else{
-      if(sens_trig != none) sens_trig = none; // forget trigger
+      sens_trig = none; // forget trigger
+   }
+}
+
+exec function tog_ignore(){
+   if(sens_mov == none) return;
+   if(sens_mov.group=='sciignore'){
+      sens_mov.group='';
+   }else{
+      sens_mov.group='sciignore';
    }
 }
 
@@ -897,9 +929,10 @@ function dpn_spawn(bool bSummonLike){
     if(mode_dpn_fall==1) return;
     dpn_newpos = vect(32767,32767,32767);
     if(mode_dpn_fall==2){
-       trace(dpn_newpos,hitnor,p.location+vect(0,0,-1024),p.location,true); // we need only z of this
+//     trace(dpn_newpos,hitnor,p.location+vect(0,0,-1024),p.location,true); // we need only z of this
        dpn_newpos.x = sp_loc.x;
        dpn_newpos.y = sp_loc.y;
+       dpn_newpos.z = p.location.z; //2026-01-19: just use playerz instead of trace
     }else if(mode_dpn_fall==0){
        trace(dpn_newpos,hitnor,sp_loc+vect(0,0,-1024),sp_loc,true);
     }
