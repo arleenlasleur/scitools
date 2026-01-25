@@ -17,11 +17,11 @@ function beginplay(){
 
 defaultproperties{
   DrawType=DT_None
-  LightBrightness=255
+  LightBrightness=240
   LightHue=173
-  LightSaturation=200
+  LightSaturation=230
   LightCone=180
-  LightEffect=LE_Spotlight
-  LightRadius=37
+  LightEffect=LE_None
+  LightRadius=18
   LightType=LT_None
 }
