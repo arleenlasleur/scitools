@@ -5,7 +5,7 @@
 // LSB16 LSB64 - lower sensing resolution, set above 0 to trigger
 // LSB state can't be updated in Actor properties window
 //====================================================================
-class a_TFS_Ruler extends actor;       // Arleen Lasleur, 2024-05-26
+class a_TFS_Ruler extends actor;                   // std, 2024-05-26
 var() color RulerScreenColor,RulerLinkColor;
 var() byte ScreenDir;
 var() string ScreenDirDesc;

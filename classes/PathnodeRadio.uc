@@ -12,7 +12,7 @@ function postrender(canvas c){
    local pathnode pn;
    local color pc;
    c.font=c.smallfont;
-   c.setpos(10,10);  c.drawtext("PathNode radio propagation assigner, v. 0.1, 2024/05/20, Arleen Lasleur.");
+   c.setpos(10,10);  c.drawtext("PathNode radio propagation assigner, v. 0.1, 2024/05/20");
    c.setpos(10,20);  c.drawtext("Type pnrdump command in console to export (write to log).");
    c.setpos(10,40);  c.drawtext("Total pathnodes: "$pnr_tot);
    c.setpos(10,50);  c.drawtext("Assigned:        "$pnr_now);

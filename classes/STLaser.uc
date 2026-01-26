@@ -1,4 +1,5 @@
-class STLaser extends Effects;
+//class STLaser extends Effects;
+class STLaser extends PathNodeRuntime;
 
 defaultproperties{
    ScaleGlow=1.0
