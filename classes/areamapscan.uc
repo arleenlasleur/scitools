@@ -1,7 +1,5 @@
 class AreaMapScan extends weapon config(scitools);
-// todo damagezone ?
 // todo laser2 mwheel not working (wrong coords of spawn/destroy)
-// todo pgup pgdn same as mwheel but for z only
 // todo M key mark current
 // todo defaults mark[all 8] xpos ypos
 // todo areaz array which acceps n_mark (byte or enum)
@@ -9,7 +7,8 @@ class AreaMapScan extends weapon config(scitools);
 // todo make strictwall
 // ???? vert_discretization switch
 // ???? floordist behavior (classic/narrow/narrower)
-// todo F7 again wont cancel
+// todox F7 again wont cancel
+// todo manual diag mode, <use this floor> key/cmd
 
 #exec texture import file="textures\scipixel.png"    name="scipixel"    package="scitools" mips=1 flags=0 btc=-2
 #exec texture import file="textures\scipixelblk.png" name="scipixelblk" package="scitools" mips=1 flags=0 btc=-2
@@ -29,8 +28,10 @@ var globalconfig bool bDisableAllBtnsNotify; // prio over 2 others
 var globalconfig bool bDisableLRmouseNotify;  // todo them
 var globalconfig bool bEnableMmouseNotify;
 var globalconfig bool bUseUntrigger;
+
 var int presets_z[64];               // selectable layers z
 var byte presets_nmax;               // selectable total (inclusive, lay0...lay19 = 20 layers)
+
 var float global_offset_x,global_offset_y; // map center vs world position for texture
 var float marked_offset_x,marked_offset_y; // map center vs world position for marked area
 var float last_mark_timestamp;             // marked area unique label
@@ -40,6 +41,16 @@ var int last_mark_texture;           // marked area known size_tex
 // new code ----------------
 var byte enab_region[10];            // because we use 9 as noregion index;
                                      // here and further, enab_ = ena_byte type because bool[] prohibited
+                                     // todo: affect [8] regions only, never go outside array
+                                     // todo: do not show even tho enabled, if nonmarkup mode
+                                     // todo: 1-8 keys toggle, m key just overwrite align
+var vector2d region_align[8];
+// id ????
+var string region_texture[8];
+var float region_when[8];   // timestamp of creation
+var float region_scale[8];   // as SHR_factor behave
+var int region_sizetex[8];
+
 // -------------------------
 // todo rename markedarea to region
 var byte n_region;
@@ -63,6 +74,8 @@ var float autospawn_timer,
 var float water_forcedodge_timer;    // fd related
 var bool  wforcedodge_ready;
 var int forcedodge_xdir,forcedodge_ydir;
+var float autofly_set_timer, autofly_clr_timer, autofly_abort_timer;      // af/aw related
+var byte autofly_trig;
 var byte mode_step,mode_texsize;     // mode number of step/texture
 var int size_step,size_tex;          // value of step/texture
 var byte map_resolution;
@@ -143,7 +156,7 @@ const y_rcol_player = 279; // =fill+(9*dm_tfh)+(8*1)+pad_glob
 const y_rcol_scope = 424; /* 5 lines lower */           const y_clientmsg = 90; // =(pad_glob*2)+(fonh*2)+pad_view
 const y_rcol_align = 540; /* 4 lines lower */           const y_statusbar = 412; // =y_vp+viewh-pad_view-fonh
 const y_rcol_region = 685; /* 4 lines lower */          const x_view_lpos = 22; //=pad_glob+pad_view
-const y_rcol_start = 801; /* 4 lines lower */           const x_view_rpos = 643; //=vieww-pad_glob+pad_view
+const y_rcol_lifetime = 830; /* 5 lines lower */           const x_view_rpos = 643; //=vieww-pad_glob+pad_view
 const y_rcol_noob = 1041; // =hardcode_scrh-pad_glob-fonh   
 // ============================================================================================================
 // USER OPERATION MODE SWITCHING
@@ -277,15 +290,6 @@ function upd_resolution(){   switch(shr_div_coords){
    case 7: map_resolution = 128;          break;   }   }
 // ============================================================================================================
 
-/*function string mwheel_behave_mark(byte inputval){
-   if(mode_mwheel==inputval) return "+";
-    else                     return " ";
-}
-function color mwheel_behave_color(byte inputval){
-   if(mode_mwheel==inputval) return makecolor(255,255,255);
-    else                     return makecolor(96 ,96 ,96 );
-} */
-
 exec function sci_forcedodge(){
    local playerpawn p;            // required. nonplayer pawns do not have bWASD controller memory
    p = playerpawn(owner);
@@ -364,28 +368,186 @@ exec function q(){
    if(owner==none) return;
    p = playerpawn(owner);
    if(p==none) return;
-   /*
-   Welcome to AMS. Greetz: OU Omega, Fumbles McStupid, Aspide, Krull0r, Metallicafan212, Sly., >K*S*A<Hybz, (T:S:B)IceLizard,
-   Xaleros, AlCapowned, apjcts and others who I forgot to mention. I wrote lots of advanced code past time and it won't be
-   possible without help of other people.
-   AMS can work in semiautomatic mode, when you specify all interested regions of map, their layers Z coordinate, press export
-   (aka prod mode) and wait until all done. All you need to do then is just prepare your package files and use UCC to compile.
-   For cutting screenshoted maps (from fullscreen FHD to square map region), FFMPEG required. It's commandline working is
-   automated to max possible. AMS use PathNode runtime-placeable equivalent as epicenters of raytracing to construct hull/walls
-   and solid collision. Due
-   to collision reactivity with bCollideActors, most puckups and deco are auto-removed. You can clean excessive in PNG editor.
-   This version almost got rid of scanning artifacts, but this lead to some objects inconsistency. This behavior fixed by
-   special mode of scanning actors when placing these.
-   Your task is to spawn PathNodeRuntime, or dummy pathnodes, dpn, on level - lots enough to do effective walls scan, though
-   less enough to don't cause freezing. Always remember, Unreal Virtual Machine works in single-thread manner on single core
-   of CPU. Because of this, even if you have very powerful processor such as latest Ryzens, excessive raycasting will eat
-   framerate. In build, or dpn placement mode, taken max measures to improve performance. Laggy performance while max quality
-   mode won't be long, after exporting done AMS will return to build mode.
-   
-   
-   
-   */
+   p.clientmessage("Welcome to AMS - semiautomatic areamap production tool.");
+   p.clientmessage(" ");
+   p.clientmessage("AMS use PathNode runtime-placeable equivalent as epicenters of raytracing");
+   p.clientmessage(" to construct hull/walls and solid collision. Due to collision reactivity with");
+   p.clientmessage(" bCollideActors, most puckups and deco are auto-removed. You can clean excessive");
+   p.clientmessage(" in PNG editor.");
+   p.clientmessage("Your task is to spawn PathNodeRuntime, or dummy pathnodes, DPN, on level -");
+   p.clientmessage(" lots enough to do effective walls scan, though less enough to don't cause");
+   p.clientmessage(" freezing. Always remember, Unreal Virtual Machine works in single-thread");
+   p.clientmessage(" manner on single core of CPU. Because of this, even if you have very powerful");
+   p.clientmessage(" processor such as latest Ryzens, excessive raycasting will eat framerate.");
+   p.clientmessage("In build, or DPN placement mode, taken max measures to improve performance.");
+   p.clientmessage(" Laggy performance while max quality mode won't be long, after exporting done");
+   p.clientmessage(" AMS will return to build mode.");
+   p.clientmessage("This version almost got rid of scanning artifacts, but this may lead to some");
+   p.clientmessage(" objects inconsistency. This behavior fixed by special mode of scanning actors");
+   p.clientmessage(" when placing these, called strict walls/directional anywalls. Even hill/slope");
+   p.clientmessage(" will count as \"wall\", so directional DPNs must have correct scan angle and");
+   p.clientmessage(" rotation to minimize artifacts.");
+   p.clientmessage(" ");
+   p.clientmessage("Navigation:");
+   p.clientmessage("W/A/S/D, Spc, C - regular move.");
+   p.clientmessage("Alt - single-key dodge. Used in pair with dodge direction keys (move keys).");
+   p.clientmessage(" If player stand still, does nothing. Diagonal directions are auto-detected.");
+   p.clientmessage(" In water, just increase speed shortly. Acts as some kind of flying replacement.");
+   p.clientmessage(" Repeat C three times - request autofly mode. Repeat time window is 0.4/0.4 sec.");
+   p.clientmessage(" Acts same as \fly\ console command. If user flying no higher than 56uu from");
+   p.clientmessage(" floor surface, autowalk will be triggered. Autofly step resets in 1.2 sec.");
+   p.clientmessage("P - disable water flag of current zone. This action can't be undone.");
+   p.clientmessage(" Use \"editactor class=zoneinfo\" console command to revert the effect.");
+   p.clientmessage(" Pain flag is always auto-disabled in all zones. Player is set to amphibious.");
+   p.clientmessage(" ");
+   p.clientmessage("Zooms, steps/scale related:");
+   p.clientmessage("Z, X - digital and spatial zoom. Digital zoom enlarge map pixels, can be set to");
+   p.clientmessage(" 1x, 2x, 4x. Spatial zoom controls SHR_Factor, or actual vectors division.");
+   p.clientmessage(" More divided coords means less level area, i. e. more zoom. Can be set to");
+   p.clientmessage(" these factors: 1px = 32uu, 16uu, 8uu, 4uu, 2uu. Both types of zoom cause less");
+   p.clientmessage(" CPU load due to less processing.");
+   p.clientmessage("B - control step size of map offset, when horizontal lock (aka lock XY)");
+   p.clientmessage(" disabled. Spoken terms are described further.");
+   p.clientmessage("G - control the size of map black texture, aka region size. Both controls");
+   p.clientmessage(" are working in zoom manner (key toggle 3 values).");
+   p.clientmessage(" ");
+   p.clientmessage("Lock/offset:");
+   p.clientmessage(" ");
+   p.clientmessage("U - LockZ aka lock layer - snap map vertically, or inherit AreaZ from PlayerZ.");
+   p.clientmessage(" Good for realtime scan result preview.");
+   p.clientmessage("O - LockXY - snap center of map to center of player X;Y coords in level. Making");
+   p.clientmessage(" search of player marker less necessary.");
+   p.clientmessage("R - toggle axis which will be altered by mouse wheel, with selected step size.");
+   p.clientmessage("I/J/K/L - horizontal offset, acts same as mouse wheel in X, Y mode.");
+   p.clientmessage("PgUp/PgDn - vertical offset, same as wheel in Z mode. Controls AreaZ presets,");
+   p.clientmessage(" which can be obtained by diag mode.");
+   p.clientmessage(" ");
+   p.clientmessage("User/misc features:");
+   p.clientmessage("T - toggle mover ignore. Useful for eliminating horizontal lifts as obstacle.");
+   p.clientmessage("Y - searchlight. Useful in very dark places of level.");
+   p.clientmessage("Q - toggle laser mode; off, infinite minus some distance from walls, or finite");
+   p.clientmessage(" with max length from player. Infinite laser is colliding, finite laser is always");
+   p.clientmessage(" ghostmode. Useful for DPN placement in player-unreachable spots. Any mode");
+   p.clientmessage(" of laser switch coords monitor to show laser instead of player. Used to create");
+   p.clientmessage(" map reactors (interactive regions of player interest such as open/closed doors,");
+   p.clientmessage(" fences, inactive/active lifts etc). Laser show nowspawning DPN render result");
+   p.clientmessage(" as pink color walls of map.");
+   p.clientmessage("F5 - player marker (off, small blinking, big yellow dot or directional arrow).");
+   p.clientmessage(" ");
+   p.clientmessage("DPN (dummy pathnode) placement:");
+   p.clientmessage("F - let them sit in spawned area (flying), autofall on floor (with floordist)");
+   p.clientmessage(" or copy height of player (inherit z)");
+   p.clientmessage("V - autospawn them");
+   p.clientmessage("H - toggle directional mode with setting of horizontal scan angle. These DPNs");
+   p.clientmessage(" produce rendering artifacts if pointed to incorrect places such as walkable");
+   p.clientmessage(" hills, floors, slopes, climbable rocks. Regular DPNs protecting from artifacts");
+   p.clientmessage(" by checking wall vertical angle, but won't recognize some unwalkable obstacles");
+   p.clientmessage(" and show these as empty space.");
+   p.clientmessage("Mid mouse/wheel press - spawn DPN in manual mode. Always available.");
+   p.clientmessage("Right mouse - kill all pawns in level and remove DPNs in area. Spawn/remove");
+   p.clientmessage(" does respecting laser, which is useful for increased precision DPNs placement.");
+   p.clientmessage(" ");
+   p.clientmessage("Left mouse:");
+   p.clientmessage("-> When laser is off, open by trigger. All triggers are active, triggerable,");
+   p.clientmessage(" norepeatable. If movers tagged to trigger, these will be started (executes");
+   p.clientmessage(" mover.trigger() or mover.untrigger() on them). Untrigger() call is disabled");
+   p.clientmessage(" by default; this behavior controlled by bUseUntrigger variable in scitools.ini");
+   p.clientmessage("-> When laser is on, open by mover.");
+   p.clientmessage("-> Always, when held for more than 0.6 sec,");
+   p.clientmessage(" enable better quality of map scan for quick preview.");
+   p.clientmessage(" ");
+   p.clientmessage("Operation mode:");
+   p.clientmessage("F1 - build bode. Used for DPN placement and convenient navigation by map.");
+   p.clientmessage(" Sets these display behavior defaults:");
+   p.clientmessage(" -> 2x digital zoom    -> 4uu spatial zoom");
+   p.clientmessage(" -> lockZ, lockXY enabled     -> player marker set to directional");
+   p.clientmessage("F4 - region markup mode. Used for final align assign layers to certain regions.");
+   p.clientmessage(" Sets these defaults:");
+   p.clientmessage(" -> 1x digital zoom    -> 16uu spatial zoom");
+   p.clientmessage(" -> max quality     -> both lockZ and lockXY disable    -> player hidden");
+   p.clientmessage("F7 - region reconstruct mode, aka AreaZ diagnostics. Performs these actions:");
+   p.clientmessage(" -> all DPNs in level will be collected, and their Z roughed");
+   p.clientmessage("  according to Z discretization (explained further).");
+   p.clientmessage(" -> remove non-unique and sorted;");
+   p.clientmessage("  if set exceed 63 elements of array, more will be ignored");
+   p.clientmessage(" Diag mode may make already used region info irrelevant, so use it before");
+   p.clientmessage(" markup, or with caution. Protected by four keys confirmation");
+   p.clientmessage(" (press 1, 2, 3, 4 sequence) to prevent invoking this accidentally.");
+   p.clientmessage("F8 - production mode. Auto scroll all regions and their layers, screenshoting");
+   p.clientmessage(" the result, writes .uc package template and .bat script template to unreal.log;");
+   p.clientmessage(" use text editor to correct these files to your needs.");
+   p.clientmessage(" You can obtain list of screenshots sorted by creation time with command:");
+   p.clientmessage(" X:\%unreal%\system\screenshots> dir /od /tc /b /a-d > file.bat");
+   p.clientmessage(" ");
+   p.clientmessage("Config variables (scitools.ini):");
+   p.clientmessage("vert_discretization - AreaZ sensitivity, the height of zone where actual map");
+   p.clientmessage(" layer shows certain texture");
+   p.clientmessage("vert_floordist - height of most DPNs relative to floor;");
+   p.clientmessage(" classic unreal dist is 61uu, narrow floor - 24, narrower - 12");
+   p.clientmessage(" narrower may cause some artifacts and excessive lines on stairsteps due to");
+   p.clientmessage(" their typical 16uu height.");
+   p.clientmessage("bDisableAllBtnsNotify - do not rogerblink pressed key name in the interface");
+   p.clientmessage("bDisableLRmouseNotify - do not blink for left/right mouse buttons, even if");
+   p.clientmessage(" other keys still enabled");
+   p.clientmessage("bEnableMmouseNotify - blink for mid mouse button as well");
+   p.clientmessage(" ");
+   p.clientmessage("Regions and prepare to prod:");
+   p.clientmessage("1-8, incl numpad keys - select/toggle region.");
+   p.clientmessage("M - mark region.");
+   p.clientmessage(" Map align on X;Y axis, texture size, spatial zoom will be overwritten.");
+   p.clientmessage("Enter - fill current layer number (aka diag result Z from set) to current");
+   p.clientmessage(" region. Keep X;Y offset unchanged for correct map working in this area.");
+   p.clientmessage(" Already existing Z in current region, if matched, will be removed");
+   p.clientmessage(" if Enter pressed twice; this is how region layer toggle working.");
+   p.clientmessage(" For region occupy navigation, no additional keys implemented, due to lots");
+   p.clientmessage(" of keys used already.");
+   p.clientmessage(" ");
+   p.clientmessage("Render:");
+   p.clientmessage("F2 - toggle render mode");
+   p.clientmessage("Leftmouse hold - preview full quality in player area or layer matching by Z.");
+   p.clientmessage(" ");
+   p.clientmessage("Tips on how to define regions:");
+   p.clientmessage("-> use ALL FAST render mode to preview/positioning overall level");
+   p.clientmessage("-> keep regions edges with zero distance; adjacent region border may disappear");
+   p.clientmessage(" just right 1px far, but not more (2px gap will result in 1px seam on map)");
+   p.clientmessage("-> always use same spatial zoom;");
+   p.clientmessage(" inconsistent scale of coords WILL cause align error");
+   p.clientmessage("-> regions may overlap, but of course this produce some excessive drawcalls");
+   p.clientmessage(" ");
+   p.clientmessage("Prod mode requirements:");
+   p.clientmessage("-> at least one Z preset in TexData[] array");
+   p.clientmessage(" (press Enter at least once, in at least one region).");
+   p.clientmessage(" ");
+   p.clientmessage("Viewport statusbar:");
+   p.clientmessage("First number - digital zoom");
+   p.clientmessage("Second, before slash - map spatial zoom, after - prod texture spatial zoom");
+   p.clientmessage(" (aka prod SHR_Factor of .uc template)");
+   p.clientmessage("Third number - framerate counter");
+   p.clientmessage("Fourth number - total DPNs in mathing by Z layer / total DPNs in level");
+   p.clientmessage(" ");
+   p.clientmessage("Console commands:");
+   p.clientmessage("init - execute playselect() again, restores all binds;");
+   p.clientmessage(" useful if user.ini is read-only");
+   p.clientmessage("diag - same as switching to diag mode, do Z set diagnostics+store+sort;");
+   p.clientmessage(" may corrupt region/texdata.");
+   p.clientmessage("savecfg - store current globalconfig variables to scitools.ini");
+   p.clientmessage("readcfg - read them from scitools.ini");
+   p.clientmessage(" ");
+   p.clientmessage("Greetz: Omega, Fumbles McStupid, Aspide, Krull0r, Metallicafan212, Sly.,");
+   p.clientmessage(" >K*S*A<Hybz, (T:S:B)IceLizard, Xaleros, AlCapowned, apjcts and rest of");
+   p.clientmessage(" OldUnreal/UnrealSP people and others who I forgot to mention. I wrote");
+   p.clientmessage(" lots of advanced code past time and it wouldn't be possible without help");
+   p.clientmessage(" of others.");
+   p.clientmessage(" ");
+   p.clientmessage("After all data prepared, AMS works unattended, just enable prod mode and");
+   p.clientmessage(" wait for all screenshots will be taken. Then you can cut them, edit if");
+   p.clientmessage(" you want in any graphics software, then prepare your package files and");
+   p.clientmessage(" use UCC to compile.");
+   p.clientmessage("For cutting screenshoted maps (from fullscreen FHD to square map region),");
+   p.clientmessage(" FFMPEG is required. It can be installed from");
+   p.clientmessage(" https://www.gyan.dev/ffmpeg/builds/");
 
+   return;
    p.clientmessage("This tool use PathNode and PathNodeRuntime objects as epicenters of raytracing the map. PathNodeRuntime actors");
    p.clientmessage("are also called DPN (dummy pathnode) and are runtime-spawnable. DPN serve to produce more raytracing if incomplete");
    p.clientmessage("coverage of map (most cases). There are raytracing artifacts - perpendicular lines on sloped floor surfaces. These");
@@ -433,25 +595,26 @@ function tick(float f){
    local rotator r;
 // local float lasermult, laserdist;
 // local vector laserorigin;
-   local pawn p;
+   local playerpawn p;
    if(owner == none) return;
-   p = pawn(owner);
+   p = playerpawn(owner);
    if(p == none) return;
-   p.health = user_hold_health;                       // prevent drown death
-   if(p.velocity.z <= -900) p.velocity.z = -900;      // prevent fall death
+   p.health = user_hold_health;                    // prevent drown death
+   if(p.velocity.z <= -900) p.velocity.z = -900;   // prevent fall death
 
-   key_when -= f;                                     // keyboard process
+   if(bDisableAllBtnsNotify) key_when = 0.5;       // keyboard process
+      else key_when -= f;
    if(key_when<0 && last_kw!=kw_none) last_kw = kw_none;
 
-   water_forcedodge_timer -= f;
-   if(water_forcedodge_timer < 0.0){                  // water forcedodge process
+   water_forcedodge_timer -= f;               // water forcedodge process
+   if(water_forcedodge_timer < 0.0){
       wforcedodge_ready = true;
       p.waterspeed = 200;
    }
 
 // todo autokill pawns instead of shield
 
-   pw_sens_fire = (p.bFire!=0);
+   pw_sens_fire = (p.bFire!=0);             // preview full rmode process
    accumulated_pw_sens_fire += f;
    if(!pw_sens_fire) accumulated_pw_sens_fire = 0;
 
@@ -466,7 +629,7 @@ function tick(float f){
          hl.z = z.z;
       }else if(mode_laser == 2){
          hl = p.location;
-         hl += vector(p.viewrotation)*laser_ray_length; // todo rename to universal dist
+         hl += vector(p.viewrotation)*laser_ray_length;
       }
       laserdot.setlocation(hl); // todo overwrite falling z coord altering into hl.z
    }else{
@@ -482,6 +645,9 @@ function tick(float f){
    hitloc -= x*7;
    laserdist = vsize(p.location - hitloc); */
 
+   autofly_set_timer -= f;
+   autofly_clr_timer -= f;
+   autofly_abort_timer -= f;
    autospawn_timer -= f;
    clientmsg_timer -= f;
    scrshot_timer -= f;
@@ -503,6 +669,41 @@ function tick(float f){
    if(last_tick_f_upd_timer<=0){     // frametime monitor process
       last_tick_f_upd_timer = 1.0;
       last_tick_f = f;
+   }
+
+   if(autofly_set_timer<0 && p.bIsCrouching){
+      autofly_trig++;
+      new_clientmsg[0] = "Autofly: "$autofly_trig$"/3";
+      new_clientmsg[1] = "Repeat crouch to trigger.";
+      clientmsg_timer = 1.2;
+      autofly_set_timer = 0.4;
+      autofly_abort_timer = 1.2;
+      if(p.physics==PHYS_Walking && autofly_trig >= 3){
+         new_clientmsg[0] = "Autofly invoked.";
+         new_clientmsg[1] = "Takeoff within 4 sec.";
+         clientmsg_timer = 2.5;
+         autofly_abort_timer = 4.0;
+         autofly_trig = 1;
+         p.consolecommand("fly");
+      }
+      if(!p.bIsCrouching) autofly_clr_timer = 0.8;
+   }
+   if(p.physics==PHYS_Walking && autofly_clr_timer<0){
+      if(p.bIsCrouching) autofly_trig = 0;
+      autofly_clr_timer = 0.4;
+   }
+   if(autofly_abort_timer<0 && autofly_trig>0){
+      if(p.physics==PHYS_None){
+         getaxes(p.rotation,x,y,z);
+         trace(hl,hn,p.location - 4000*z,p.location,true);
+         if(vsize(hl-p.location)<=56){
+            new_clientmsg[0] = "Autowalk invoked.";
+            clientmsg_timer = 2.5;
+            autofly_trig = 0;
+            autofly_set_timer = 4.0;
+            p.consolecommand("walk");
+         }
+      }else autofly_trig = 0;
    }
 }
 
@@ -529,24 +730,38 @@ function sci_scripted_dpn_spawn(vector l){
    dpn_spawn(false);
 }
 
-//todo: laser mesh, selectable pnz trunc, left hand hotkeys to control spawn mode
+// todo: laser mesh, selectable pnz trunc
 // todo: welcome dialog
-// switchable classic/narrow mode
+// todo switchable classic/narrow mode
+
+function int draw_key_help(canvas c, color dc, string hk, string desc, int from_x, int from_y){
+   local int desc_x,lx,ly;
+   desc_x = (len(hk)+1)*fonw; // offset 1 xpos to descr
+   lx = from_x; ly = from_y;
+   c.drawcolor = pc_wh_f;
+   c.setpos(lx,ly);  c.drawtext(hk);
+   if(hk!="") lx += desc_x;   // do not apply offset if empty hotkey
+   c.drawcolor = dc;
+   c.setpos(lx,ly);  c.drawtext(desc);
+   return ly+fonh;            // move 1 ypos down
+}
 
 function int draw_key_action(canvas c, color dc, keywhere evs, string hk, string desc, int from_x, int from_y){
    local int desc_x,lx,ly;
    desc_x = (len(hk)+1)*fonw; // offset 1 xpos to descr
    lx = from_x; ly = from_y;
    if(last_kw==evs && last_kw!=kw_none){
-      if(key_when >= 0.3){ c.drawcolor = pc_cyan; goto dka_pc_ready; }
-      if(key_when >= 0.2){ c.drawcolor = pc_red;  goto dka_pc_ready; }
-      if(key_when >= 0.1)  c.drawcolor = pc_cyan;
+      if(key_when >= 0.40){ c.drawcolor = pc_wh;   goto dka_pc_ready; } // reserved for disable blinking
+      if(key_when >= 0.25){ c.drawcolor = pc_cyan; goto dka_pc_ready; } // blinking, frame 1
+      if(key_when >= 0.15){ c.drawcolor = pc_red;  goto dka_pc_ready; } // frame 2
+      if(key_when >= 0.05)  c.drawcolor = pc_cyan;                      // frame 3
       dka_pc_ready:
    }else{
       c.drawcolor = pc_wh;                          // dim white shithacks:
       if(evs==kw_t && sens_mov==none) c.drawcolor = pc_gray; // no mover to ignore
-      if(evs==kw_ijkl && ena_lockxy) c.drawcolor = pc_gray;  // no ijkl, snapped to player
-      if(evs==kw_m && mode_oper!=2) c.drawcolor = pc_gray; // not in markup mode
+      if(evs==kw_ijkl && ena_lockxy)  c.drawcolor = pc_gray; // no ijkl, snapped to player
+      if(evs==kw_m && mode_oper!=2)   c.drawcolor = pc_gray; // not in markup mode
+      if(evs==kw_p && dc!=pc_orange)  c.drawcolor = pc_gray; // zone is not water
    }
    c.setpos(lx,ly);  c.drawtext(hk);
    if(desc=="") return ly;    // abort if empty
@@ -655,7 +870,7 @@ function postrender(canvas c){
              else if (shr_div_coords==3) c.drawcolor = makecolor(112,112,160);
              else                        c.drawcolor = makecolor(80,80,128);
          }
-         if(pn==laserdot) c.drawcolor = pc_pink;
+         if(pn==laserdot) c.drawcolor = pc_pinker;
 //       if(abs(rotator(hn).pitch) <= anti_artifacts_maxslope){ // old code // todo strictwalls here
          if(    rotator(hn).pitch  <= anti_artifacts_maxslope){ // allow negative slope as well
                   // todo
@@ -793,7 +1008,7 @@ function postrender(canvas c){
    pc_tmp = mode_oper==1 ? pc_blue : pc_blue_f;
    if(mode_oper==4)
      pc_tmp = (int(level.timeseconds/0.5) % 2)==0 ? pc_blue : pc_cyan;   // blink nowentering mode
-   upy = draw_key_action(c, pc_tmp,  kw_f7, "<F7>", "diag",   upx, upy); // todo cancellable + 1234 keys confirm
+   upy = draw_key_action(c, pc_tmp,  kw_f7, "<F7>", "diag",   upx, upy);
    pc_tmp = mode_oper==2 ? pc_green : pc_green_f;
    upy = draw_key_action(c, pc_tmp, kw_f4, "<F4>", "markup", upx, upy);
    pc_tmp = mode_oper==3 ? pc_green : pc_green_f;
@@ -845,7 +1060,9 @@ function postrender(canvas c){
    pc_tmp = mode_oper!=2 ? pc_green_f : pc_green;
          draw_key_action(c, pc_tmp, kw_m,  "<M>", "mark reg",  upx, upy);
    upx = x_hdr_region;
-   upy = draw_key_action(c, pc_orange, kw_p, "<P>", "!water",  upx, upy);
+   pc_tmp = pc_orange;                                      // shithack: adjust pc_tmp to trigger pc_wh replacement
+   if(region.zone!=none){ if(!region.zone.bwaterzone) pc_tmp = pc_orange_f; }  // and dont access zone handle again
+   upy = draw_key_action(c, pc_tmp, kw_p, "<P>", "!water",  upx, upy);
    // -------------------
    upx = x_hdr_region; upy = y_hdr_region;
    c.drawcolor = pc_green;
@@ -1006,10 +1223,13 @@ function postrender(canvas c){
    upy = draw_key_action(c, pc_wh, kw_none, "", "S: "$size_step$"uu", upx, upy);
    upy = draw_key_action(c, pc_wh, kw_none, "", "T: "$size_tex$"px", upx, upy);
    // -------------------
-   upx = x_rcol; upy = y_rcol_start;
-   upy = draw_key_action(c, pc_brown, kw_none, "", "AreaZ bhvr", upx, upy);
-   upy = draw_key_action(c, pc_brown, kw_none, "", "floordist:", upx, upy);
-   upy = draw_key_action(c, pc_brown, kw_none, "", "z discr:", upx, upy);
+   upx = x_rcol; upy = y_rcol_lifetime;
+   upy = draw_key_action(c, pc_pink, kw_none, "", "Lifetime", upx, upy);
+   upy = draw_key_action(c, pc_pink, kw_none, "", "behavior", upx, upy);
+   upy += fonh;
+   upy = draw_key_action(c, pc_brown, kw_none, "", "FlrDist:", upx, upy);
+   upy = draw_key_action(c, pc_brown, kw_none, "", "ZDiscr:", upx, upy);
+   upy = draw_key_action(c, pc_brown, kw_none, "", "SHRf:", upx, upy);
    // -------------------
    upx = x_rcol; upy = y_rcol_noob;
    upy = draw_key_action(c, pc_green, kw_none, "Noob? cmd", ">q", upx, upy); // right sidebar ends
@@ -1047,7 +1267,8 @@ function postrender(canvas c){
    c.drawcolor = pc_wh;
    i = int(1/last_tick_f);
    if(i > 60) i = 60;
-   c.setpos(x_view_lpos+(15*fonw),y_statusbar); c.drawtext(i$"fps");
+   c.setpos(x_view_lpos+(15*fonw),y_statusbar); c.drawtext(i$"fps ");
+
 /* if(pn_tot>1000) c.drawcolor = pc_yellow;
    if(pn_tot>2000) c.drawcolor = pc_orange;
    if(pn_tot>3000) c.drawcolor = pc_red;
@@ -1115,6 +1336,7 @@ function postbeginplay(){
 
    foreach allactors(class'info',ifo){
       if(!ifo.isa('ONPLevelInfo')) ifo.SetPropertyText("MaxHealth","500");
+      if(ifo.isa('ZoneInfo')) zoneinfo(ifo).bPainZone = false;
    }
 
    foreach allactors(class'inventory',w) if(w != self) w.destroy();
@@ -1179,6 +1401,7 @@ function playselect(){
    p.consolecommand("killall pickup");
    p.consolecommand("killall decoration");
    p.consolecommand("killall decal");
+   p.consolecommand("amphibious");
    p.consolecommand("set input alt sci_forcedodge");       // level setup ends
    p.consolecommand("set input f1 tog_opermode_scan");
    p.consolecommand("set input f7 tog_opermode_diag");
@@ -1279,7 +1502,6 @@ exec function shdn_waterable(){
    z = region.zone;
    if(z == none) return;
    if(!z.bWaterzone) return;
-   key_when = 0.3; last_kw = kw_p;
    z.bWaterzone = false;
    new_clientmsg[0] = string(z.name)$" bWaterZone";
    new_clientmsg[1] = "is now false.";
@@ -1425,57 +1647,57 @@ function PathNode FindRPN(vector search_location, float range_sensitivity){
 }
 
 function do_diag_z(){
-    local pathnoderuntime pn;
-    local float pnz,pnz_lsb;
-    local int i, j;
-    local bool bDup;
-    bDup = false;
-    if(laserdot==none) bDup = true; // cancer code but safe to use bdup. returnless protection against iterating laser
-    presets_nmax = 0;
-    foreach AllActors(class'pathnoderuntime', pn){ // collect
-       if(bdup) goto skip_diagz_nolaser;
-       if(pn==laserdot) continue;
-       skip_diagz_nolaser:   // evaded "accessed none" error. no need to bdup=false, it will be done anyway later
-       if(presets_nmax >= 64) break;
-       pnz = pn.location.z; 
-       pnz_lsb = pnz % vert_discretization;
-       pnz -= pnz_lsb; 
-       bDup = false;
-       for(i=0; i<presets_nmax; i++){    // chk if exists
-          if(presets_z[i] == pnz){
-             bDup = true;
-             break;
-          }
-       }
-       if(!bDup){                        // add
-          presets_z[presets_nmax] = pnz;
-          presets_nmax++;
-       }
-    }
-    for(i=1; i<presets_nmax; i++){       // insertion sort
-       pnz = presets_z[i];               // insertable
-       j = i - 1;                        // cmp from prev
-       while(j>=0 && presets_z[j]>pnz){  // shr if higher
-          presets_z[j+1] = presets_z[j];
-          j--;
-       }
-       presets_z[j+1] = pnz;             // insert in pos
-    }
-//  for(i=0; i<presets_nmax; i++) broadcastmessage(string(presets_z[i]));  // log result
-    mode_player = 0;          // reset interface to grab-ready // todo reset zooms
-    mode_all_layers = 0;
-    mode_mwheel = 2;
-    mode_laser = 0;
-    ena_2xzoom = false;
-    ena_4xzoom = false;
-    shr_div_coords = 4;
-    upd_resolution();
-    ena_lockz = false;
-    ena_lockxy = false;
-    new_clientmsg[0] = "AreaZ set diag probe done, ret to mark";
-    new_clientmsg[1] = "mode. Prod defaults applied.";
-    clientmsg_timer = 4.0;
-    mode_oper = 2;
+   local pathnoderuntime pn;
+   local float pnz,pnz_lsb;
+   local int i, j;
+   local bool bDup;
+   bDup = false;
+   if(laserdot==none) bDup = true; // cancer code but safe to use bdup. returnless protection against iterating laser
+   presets_nmax = 0;
+   foreach AllActors(class'pathnoderuntime', pn){ // collect
+      if(bdup) goto skip_diagz_nolaser;
+      if(pn==laserdot) continue;
+      skip_diagz_nolaser:   // evaded "accessed none" error. no need to bdup=false, it will be done anyway later
+      if(presets_nmax >= 64) break;
+      pnz = pn.location.z; 
+      pnz_lsb = pnz % vert_discretization;
+      pnz -= pnz_lsb; 
+      bDup = false;
+      for(i=0; i<presets_nmax; i++){    // chk if exists
+         if(presets_z[i] == pnz){
+            bDup = true;
+            break;
+         }
+      }
+      if(!bDup){                        // add
+         presets_z[presets_nmax] = pnz;
+         presets_nmax++;
+      }
+   }
+   for(i=1; i<presets_nmax; i++){       // insertion sort
+      pnz = presets_z[i];               // insertable
+      j = i - 1;                        // cmp from prev
+      while(j>=0 && presets_z[j]>pnz){  // shr if higher
+         presets_z[j+1] = presets_z[j];
+         j--;
+      }
+      presets_z[j+1] = pnz;             // insert in pos
+   }
+// for(i=0; i<presets_nmax; i++) broadcastmessage(string(presets_z[i]));  // log result
+   mode_player = 0;          // reset interface to grab-ready // todo reset zooms
+   mode_all_layers = 0;
+   mode_mwheel = 2;
+   mode_laser = 0;
+   ena_2xzoom = false;
+   ena_4xzoom = false;
+   shr_div_coords = 4;
+   upd_resolution();
+   ena_lockz = false;
+   ena_lockxy = false;
+   new_clientmsg[0] = "AreaZ set diag probe done, return to";
+   new_clientmsg[1] = "mark mode. Prod defaults applied.";
+   clientmsg_timer = 4.0;
+   mode_oper = 2;
 }
 
 exec function ctl_mw_less(){
@@ -1490,7 +1712,7 @@ exec function ctl_mw_less(){
        else laser_ray_length = 32;
 //      new_clientmsg[0] = "Wall dist: "$int(laser_ray_length);
 //      clientmsg_timer = 2.0;
-   }else{                                        switch(mode_mwheel){
+   }else{ if(mode_laser!=0) return;              switch(mode_mwheel){
       case 0: if(!ena_lockxy) global_offset_x -= size_step; break;
       case 1: if(!ena_lockxy) global_offset_y -= size_step; break;
       case 2: if(n_layerz>0) n_layerz--;                    break;  }
@@ -1509,7 +1731,7 @@ exec function ctl_mw_more(){
        else laser_ray_length = 384;
 //      new_clientmsg[0] = "Wall dist: "$int(laser_ray_length);
 //      clientmsg_timer = 2.0;
-   }else{                                        switch(mode_mwheel){
+   }else{ if(mode_laser!=0) return;              switch(mode_mwheel){
       case 0: if(!ena_lockxy) global_offset_x += size_step; break;
       case 1: if(!ena_lockxy) global_offset_y += size_step; break;
       case 2: if(n_layerz<presets_nmax) n_layerz++;         break;  }
@@ -1543,6 +1765,7 @@ function altfire(float f){
    local pathnoderuntime pn;
    p = playerpawn(owner);
    if(p == none) return;
+   if(laserdot == none) return;
    key_when = 0.3; last_kw = kw_rmb;
    p.consolecommand("killpawns");
    getaxes(p.viewrotation,x,y,z);
@@ -1553,7 +1776,7 @@ function altfire(float f){
       y = p.location + 32*x;
       rad = 80;
    }
-   foreach radiusactors(class'PathNodeRuntime',pn,rad,y) pn.destroy();
+   foreach radiusactors(class'PathNodeRuntime',pn,rad,y) if(pn!=laserdot) pn.destroy();
 }
 
 function fire(float f){
@@ -1643,6 +1866,15 @@ defaultproperties{
   PickupAmmoCount=9999
   ena_prod=false
   PickupMessage=AreaMap CT scan tool. Enter Q in console for more info.
+  region_align(0)=(X=275.0,Y=0.0)
+  region_align(1)=(X=-275.0,Y=0.0)
+  region_align(2)=(X=0.0,Y=275.0)
+  region_align(3)=(X=275.0,Y=275.0)
+  region_align(4)=(X=-275.0,Y=275.0)
+  region_align(5)=(X=0.0,Y=-275.0)
+  region_align(6)=(X=275.0,Y=-275.0)
+  region_align(7)=(X=-275.0,Y=-275.0)
+
 }
 
 /*
