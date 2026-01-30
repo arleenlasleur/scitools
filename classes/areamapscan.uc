@@ -161,25 +161,56 @@ const y_rcol_noob = 1041; // =hardcode_scrh-pad_glob-fonh
 // ============================================================================================================
 // USER OPERATION MODE SWITCHING
 // ============================================================================================================
-exec function tog_opermode_scan(){ if(mode_oper==0) return; // resets confirm already
-   key_when = 0.3; last_kw = kw_f1; mode_oper = 0; n_region = 9; }
-exec function tog_opermode_diag(){ if(mode_oper==1) return;
-   if(mode_oper==4){ mode_oper=0; return; } // can't use mb_fail_confirm() here
-   key_when = 0.3; last_kw = kw_f7; mode_oper = 4; n_region = 9; mode_confirm = 0; }
-exec function tog_opermode_mark(){ if(mode_oper==2 || mode_oper==4) return;
-   key_when = 0.3; last_kw = kw_f4; mode_oper = 2; n_region = 0; }
-exec function tog_opermode_prod(){ if(mode_oper==3 || mode_oper==4) return;
-   key_when = 0.3; last_kw = kw_f8; mode_oper = 3; n_region = 0; }
+exec function tog_opermode_uni(byte sw_to_oper){
+   local byte i;
+   if(mode_oper == sw_to_oper) return;
+   if(mode_oper==4){ mode_oper=0; return; }
+   key_when = 0.3;
+   switch(sw_to_oper)              {
+   case 0: last_kw=kw_f1;                          mode_oper=0; n_region=9; ena_2xzoom=true;  ena_4xzoom=false;
+           shr_div_coords=2; /* todo lifetime shr, not 2 */   upd_resolution();  for(i=0;i<8;i++) enab_region[i]=0;  break;
+   case 1: last_kw=kw_f7;                          mode_oper=4; n_region=9;                                     break;
+   case 2: last_kw=kw_f4; if(mode_oper==4) return; mode_oper=2; n_region=0; ena_2xzoom=false; ena_4xzoom=false; break;
+   case 3: last_kw=kw_f8; if(mode_oper==4) return; mode_oper=3; n_region=0;                                     break; }
+} 
+// exec function tog_opermode_scan(){
+//    local byte i;
+//  if(mode_oper==0) return; // resets confirm already
+//    key_when = 0.3; last_kw = kw_f1; mode_oper = 0; n_region = 9; ena_2xzoom = true; ena_4xzoom = false;
+//    shr_div_coords = 2; upd_resolution(); for(i=0;i<8;i++) enab_region[i] = 0;
+// }
+// exec function tog_opermode_diag(){ if(mode_oper==1) return;
+//    if(mode_oper==4){ mode_oper=0; return; } // can't use mb_fail_confirm() here
+//    key_when = 0.3; last_kw = kw_f7; mode_oper = 4; n_region = 9; mode_confirm = 0; }
+// exec function tog_opermode_mark(){ if(mode_oper==2 || mode_oper==4) return;
+//    key_when = 0.3; last_kw = kw_f4; mode_oper = 2; n_region = 0; ena_2xzoom = false; ena_4xzoom = false; }
+// exec function tog_opermode_prod(){ if(mode_oper==3 || mode_oper==4) return;
+//    key_when = 0.3; last_kw = kw_f8; mode_oper = 3; n_region = 0; }
 // ============================================================================================================
 // USER REGION SELECT/TOGGLE + CONFIRM MEM-DESTRUCTIVE ACTIONS
 // ============================================================================================================
-exec function tog_region_1(){
-   if(mode_oper==4) goto user_validation_a;
+exec function tog_region_uni(byte new_nregion){
+   if(new_nregion>7) return;
+   if(mode_oper==4 && new_nregion<=3) goto user_validation_uni;
    if(mode_oper!=2 && mode_oper!=3) return;
-     n_region = 0;  enab_region[n_region] = enab_region[n_region]==1 ? 0 : 1;  return;
-     user_validation_a:  if(mode_confirm==0) mode_confirm = 1; else do_fail_confirm(); /*{mode_confirm=0; mode_oper=0;} old*/
+   n_region = new_nregion;
+   enab_region[n_region] = enab_region[n_region]==1 ? 0 : 1;
+   return;
+   user_validation_uni:
+   if(mode_confirm==new_nregion){
+      mode_confirm = new_nregion+1;
+      if(mode_confirm==4) do_diag_z();
+   }else
+      do_fail_confirm();
 }
-exec function tog_region_2(){
+
+// exec function tog_region_1(){
+//    if(mode_oper==4) goto user_validation_a;
+//    if(mode_oper!=2 && mode_oper!=3) return;
+//      n_region = 0;  enab_region[n_region] = enab_region[n_region]==1 ? 0 : 1;  return;
+//      user_validation_a:  if(mode_confirm==0) mode_confirm = 1; else do_fail_confirm(); /*{mode_confirm=0; mode_oper=0;} old*/
+// }
+ /* exec function tog_region_2(){
    if(mode_oper==4) goto user_validation_b;
    if(mode_oper!=2 && mode_oper!=3) return;
      n_region = 1;  enab_region[n_region] = enab_region[n_region]==1 ? 0 : 1;  return;
@@ -196,7 +227,8 @@ exec function tog_region_4(){
    if(mode_oper!=2 && mode_oper!=3) return;
      n_region = 3;  enab_region[n_region] = enab_region[n_region]==1 ? 0 : 1;  return;
      user_validation_d:  if(mode_confirm==3) do_diag_z();      else do_fail_confirm();
-}
+}   */
+/*
 exec function tog_region_5(){ // we dont need last return in last 4 because of no trailing confirm code
    mb_fail_confirm();
    if(mode_oper!=2 && mode_oper!=3) return;
@@ -216,7 +248,7 @@ exec function tog_region_8(){
    mb_fail_confirm();
    if(mode_oper!=2 && mode_oper!=3) return;
      n_region = 7;  enab_region[n_region] = enab_region[n_region]==1 ? 0 : 1;
-}
+} */
 // ============================================================================================================
 // USER REGION SELECT/TOGGLE + CONFIRM MEM-DESTRUCTIVE ACTIONS
 // ============================================================================================================
@@ -304,13 +336,28 @@ exec function sci_forcedodge(){
    performdodge(p);
 }
 
-exec function mark(){
-   marked_offset_x = global_offset_x;
-   marked_offset_y = global_offset_y;
-   last_mark_timestamp = level.timeseconds;
-   last_mark_resolution = map_resolution;
-   last_mark_texture = size_tex;
-   ena_tex_mark = true;
+exec function mark_current_region(){
+   mb_fail_confirm();
+   if(mode_oper!=2) return;
+   key_when = 0.3; last_kw = kw_m;
+
+   if(n_region>7) return;  // prohibit access outside of array
+   enab_region[n_region] = 1;
+   region_align[n_region].x = global_offset_x;
+   region_align[n_region].y = global_offset_y;
+   region_when[n_region] = level.timeseconds;
+   region_scale[n_region] = map_resolution;        // as SHR_factor behave, todo inherit from lifetime, not current
+   region_sizetex[n_region] = size_tex;
+// ena_tex_mark = true; // todo mb shit
+/*  / new code ----------------
+var byte enab_region[10];            // because we use 9 as noregion index;
+                                     // todo: affect [8] regions only, never go outside array
+                                     // todo: do not show even tho enabled, if nonmarkup mode
+                                     // todo: 1-8 keys toggle, m key just overwrite align
+// id ????
+var string region_texture[8];        */
+
+// todo display all regions
 }
 
 exec function prod(){
@@ -336,7 +383,7 @@ exec function prod(){
       log(" ",'AMS');
       log(" defaultproperties{",'AMS');
       log("   SHR_factor="$shr_div_coords,'AMS');
-      log("   AreaHeight="$vert_discretization,'AMS');
+      log("   FloorHeight="$vert_discretization,'AMS');
    for(i=0; i<=presets_nmax; i++){
       ts = ""; if(i<10) ts $= "0"; ts $= string(i);
       log("   MapTex("$i$")=texture'????_"$ts$"'",'AMS');
@@ -394,7 +441,7 @@ exec function q(){
    p.clientmessage(" If player stand still, does nothing. Diagonal directions are auto-detected.");
    p.clientmessage(" In water, just increase speed shortly. Acts as some kind of flying replacement.");
    p.clientmessage(" Repeat C three times - request autofly mode. Repeat time window is 0.4/0.4 sec.");
-   p.clientmessage(" Acts same as \fly\ console command. If user flying no higher than 56uu from");
+   p.clientmessage(" Acts same as \"fly\" console command. If user flying no higher than 56uu from");
    p.clientmessage(" floor surface, autowalk will be triggered. Autofly step resets in 1.2 sec.");
    p.clientmessage("P - disable water flag of current zone. This action can't be undone.");
    p.clientmessage(" Use \"editactor class=zoneinfo\" console command to revert the effect.");
@@ -831,6 +878,11 @@ function postrender(canvas c){
       pnz = pn.location.z % vert_discretization;  // eliminate z deviations to vert resolution
       pnz = pn.location.z - pnz;
       nomatch_z = (abs(sel_z - pnz) > vert_discretization);   // was 16/64 = +25% overlapping of discretized area
+      // todo why this behave other than diagz layers? respect vert_discr
+      // todo rename it to floorheight
+      // TODO: MANUAL Zset write mode, red/cyan apples, some sort of "use this floor".
+      // TODO write doku how to define them, incl write bottom/ceil Z to paper and calc middleval, mb adjust floorheight
+      // ?????????? per-layer floorheight (imo shit)
       if(mode_all_layers==0 && nomatch_z) continue; // we maybe still process further in fullcolor map mode
       if(!nomatch_z) pn_mz++;
 //----- dist ignorator ---------------------------------------
@@ -923,40 +975,74 @@ function postrender(canvas c){
       }
    }
 //----- patch bg position active, over tex -----------------------------------
-   if(ena_tex_mark){
-      marked_error = last_mark_texture - size_tex;
-      hlx = (global_offset_x - marked_offset_x);
-      hly = (global_offset_y - marked_offset_y);
-      hlx = hlx >> shr_div_coords;
+   for(i=0;i<8;i++){
+
+   if(enab_region[i]==0) continue;
+// if(ena_tex_mark){
+//    marked_error = last_mark_texture - size_tex;
+      marked_error = region_sizetex[i] - size_tex;
+//    hlx = (global_offset_x - marked_offset_x);
+//    hly = (global_offset_y - marked_offset_y);
+      hlx = (global_offset_x - region_align[i].x);
+      hly = (global_offset_y - region_align[i].y);
+//    hlx = hlx >> region_shr; //shr_div_coords;
+//    hly = hly >> region_shr; //shr_div_coords;
+      hlx = hlx >> shr_div_coords; // todo if(shr_div_coords!=region_shr) warn_shr;
       hly = hly >> shr_div_coords;
-      hlx += (last_mark_texture>>1);  hlx -= (marked_error>>1);
-      hly += (last_mark_texture>>1);  hly -= (marked_error>>1);
-      mkx = hlx - (last_mark_texture>>1);
-      mky = hly - (last_mark_texture>>1);
-      if(ena_2xzoom){
-         mkx *= 2; mkx -= (last_mark_texture>>1);
-         mky *= 2; mky -= (last_mark_texture>>1);
+//    hlx += (last_mark_texture>>1);  hlx -= (marked_error>>1);
+//    hly += (last_mark_texture>>1);  hly -= (marked_error>>1);
+      hlx += (region_sizetex[i]>>1);  hlx -= (marked_error>>1);
+      hly += (region_sizetex[i]>>1);  hly -= (marked_error>>1);
+//    mkx = hlx - (last_mark_texture>>1);
+//    mky = hly - (last_mark_texture>>1);
+      mkx = hlx - (region_sizetex[i]>>1);
+      mky = hly - (region_sizetex[i]>>1);
+/*      if(ena_2xzoom){     // todo prohibit Z key in markup mode, always reset dzoom to 1x
+//       mkx *= 2; mkx -= (last_mark_texture>>1);
+//       mky *= 2; mky -= (last_mark_texture>>1);
+         mkx *= 2; mkx -= (region_sizetex[i]>>1);
+         mky *= 2; mky -= (region_sizetex[i]>>1);
       }
       if(ena_4xzoom){
-         mkx *= 2; mkx -= (last_mark_texture>>1);
-         mky *= 2; mky -= (last_mark_texture>>1);
-      }
-      mkx += hud_maptex_offset_x;
+//       mkx *= 2; mkx -= (last_mark_texture>>1);
+//       mky *= 2; mky -= (last_mark_texture>>1);
+         mkx *= 2; mkx -= (region_sizetex[i]>>1);
+         mky *= 2; mky -= (region_sizetex[i]>>1);
+      } */
+      mkx += hud_maptex_offset_x;    // ?????????xxxxxxxxxxx
       mky += hud_maptex_offset_y;
       c.drawcolor = makecolor(255,255,192);
-      c.setpos(mkx+4, mky+1);      c.drawtext("Marked at " $ int(last_mark_timestamp) $ "s.");
-      c.setpos(mkx+4, mky+1 +87);  c.drawtext("Cyan border MUST disappear");
-      c.setpos(mkx+4, mky+1 +116); c.drawtext("on edge of adjacent area.");
-      c.setpos(mkx+4, mky-61 +last_mark_texture);     c.drawtext("Scale mismatch WILL cause");
-      c.setpos(mkx+4, mky-61 +last_mark_texture +29); c.drawtext("positioning error.");
+//    c.setpos(mkx+4, mky+1);      c.drawtext("Marked at " $ int(last_mark_timestamp) $ "s.");
+      c.setpos(mkx+4, mky+1);      c.drawtext("Marked at " $ int(region_when[i]) $ "s.");
+//      c.setpos(mkx+4, mky+1 +87);  c.drawtext("Cyan border MUST disappear");
+//      c.setpos(mkx+4, mky+1 +116); c.drawtext("on edge of adjacent area.");
+//    c.setpos(mkx+4, mky-61 +last_mark_texture);     c.drawtext("Scale mismatch WILL cause");
+//    c.setpos(mkx+4, mky-61 +last_mark_texture +29); c.drawtext("positioning error.");
+      c.setpos(mkx+4, mky-61 +region_sizetex[i]);     c.drawtext("Scale mismatch WILL cause");
+      c.setpos(mkx+4, mky-61 +region_sizetex[i] +29); c.drawtext("positioning error.");
       c.drawcolor = makecolor(192,255,192);
-      c.setpos(mkx+4, mky+1 +29); c.drawtext("X: " $ int(marked_offset_x) $ "  Y: " $ int(marked_offset_y));
-      c.setpos(mkx+4, mky+1 +58); c.drawtext("T: " $ last_mark_texture    $ "  S: " $ last_mark_resolution);
+//    c.setpos(mkx+4, mky+1 +29); c.drawtext("X: " $ int(marked_offset_x) $ "  Y: " $ int(marked_offset_y));
+//    c.setpos(mkx+4, mky+1 +58); c.drawtext("T: " $ last_mark_texture    $ "  S: " $ last_mark_resolution);
+      c.setpos(mkx+4, mky+1 +29); c.drawtext("X: " $ int(region_align[i].x) $ "  Y: " $ int(region_align[i].y));
+      c.setpos(mkx+4, mky+1 +58); c.drawtext("T: " $ region_sizetex[i]      $ "  S: " $ region_scale[i]);
       c.drawcolor = makecolor(128,229,255);
-      c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', last_mark_texture, 1, 0,0,4,4); // t,l corner right
-      c.setpos(mkx, mky-1+last_mark_texture); c.drawtile(texture'scipixel', last_mark_texture, 1, 0,0,4,4); // b,l corner right
-      c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', 1, last_mark_texture, 0,0,4,4); // t,l corner down
-      c.setpos(mkx-1+last_mark_texture, mky); c.drawtile(texture'scipixel', 1, last_mark_texture, 0,0,4,4); // t,r corner down
+//    c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', last_mark_texture, 1, 0,0,4,4); // t,l corner right
+//    c.setpos(mkx, mky-1+last_mark_texture); c.drawtile(texture'scipixel', last_mark_texture, 1, 0,0,4,4); // b,l corner right
+//    c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', 1, last_mark_texture, 0,0,4,4); // t,l corner down
+//    c.setpos(mkx-1+last_mark_texture, mky); c.drawtile(texture'scipixel', 1, last_mark_texture, 0,0,4,4); // t,r corner down
+      switch(i)                       {
+         case 0: c.drawcolor = pc_blue;   break;
+         case 1: c.drawcolor = pc_yellow; break;
+         case 2: c.drawcolor = pc_cyan;   break;
+         case 3: c.drawcolor = pc_orange; break;
+         case 4: c.drawcolor = pc_green;  break;
+         case 5: c.drawcolor = pc_pink;   break;
+         case 6: c.drawcolor = pc_red;    break;
+         case 7: c.drawcolor = pc_brown;  break;   }
+      c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', region_sizetex[i], 1, 0,0,4,4); // t,l corner right
+      c.setpos(mkx, mky-1+region_sizetex[i]); c.drawtile(texture'scipixel', region_sizetex[i], 1, 0,0,4,4); // b,l corner right
+      c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', 1, region_sizetex[i], 0,0,4,4); // t,l corner down
+      c.setpos(mkx-1+region_sizetex[i], mky); c.drawtile(texture'scipixel', 1, region_sizetex[i], 0,0,4,4); // t,r corner down
    }
 // ---- texclip bg -----------------------------------------------------------
    c.drawcolor = pc_bg;                                       // todo mb disableable
@@ -1088,7 +1174,7 @@ function postrender(canvas c){
          case 6: c.drawcolor = pc_red_f;    break;
          case 7: c.drawcolor = pc_brown_f;  break;
       }
-      if(n_region==i) switch(n_region){
+      if(n_region==i){              switch(n_region){
          case 0: c.drawcolor = pc_blue;     break;
          case 1: c.drawcolor = pc_yellow;   break;
          case 2: c.drawcolor = pc_cyan;     break;
@@ -1096,7 +1182,8 @@ function postrender(canvas c){
          case 4: c.drawcolor = pc_green;    break;
          case 5: c.drawcolor = pc_pink;     break;
          case 6: c.drawcolor = pc_red;      break;
-         case 7: c.drawcolor = pc_brown;    break;
+         case 7: c.drawcolor = pc_brown;    break;  }
+         if(enab_region[n_region]==0) c.drawcolor = pc_gray;
       }
       j = i>n_region ? 2 : 0;
       k = i<n_region ? 2 : 0;
@@ -1403,10 +1490,14 @@ function playselect(){
    p.consolecommand("killall decal");
    p.consolecommand("amphibious");
    p.consolecommand("set input alt sci_forcedodge");       // level setup ends
-   p.consolecommand("set input f1 tog_opermode_scan");
-   p.consolecommand("set input f7 tog_opermode_diag");
+   p.consolecommand("set input f1 tog_opermode_uni 0");
+   p.consolecommand("set input f7 tog_opermode_uni 1");
+   p.consolecommand("set input f4 tog_opermode_uni 2");
+   p.consolecommand("set input f8 tog_opermode_uni 3");     // opermode ends
+/* p.consolecommand("set input f1 tog_opermode_scan");
+   p.consolecommand("set input f7 tog_opermode_diag");                         old code
    p.consolecommand("set input f4 tog_opermode_mark");
-   p.consolecommand("set input f8 tog_opermode_prod");     // opermode ends
+   p.consolecommand("set input f8 tog_opermode_prod");     // opermode ends  */
    p.consolecommand("set input z tog_digzoom");
    p.consolecommand("set input x tog_shr_factor");
    p.consolecommand("set input b tog_mode_step");
@@ -1418,14 +1509,14 @@ function playselect(){
    p.consolecommand("set input pageup inc_nlayer");
    p.consolecommand("set input pagedown dec_nlayer");
 // --------- regions ---------------------------------------------------
-   p.consolecommand("set input 1 tog_region_1"); p.consolecommand("set input numpad1 tog_region_1");
-   p.consolecommand("set input 2 tog_region_2"); p.consolecommand("set input numpad2 tog_region_2");
-   p.consolecommand("set input 3 tog_region_3"); p.consolecommand("set input numpad3 tog_region_3");
-   p.consolecommand("set input 4 tog_region_4"); p.consolecommand("set input numpad4 tog_region_4");
-   p.consolecommand("set input 5 tog_region_5"); p.consolecommand("set input numpad5 tog_region_5");
-   p.consolecommand("set input 6 tog_region_6"); p.consolecommand("set input numpad6 tog_region_6");
-   p.consolecommand("set input 7 tog_region_7"); p.consolecommand("set input numpad7 tog_region_7");
-   p.consolecommand("set input 8 tog_region_8"); p.consolecommand("set input numpad8 tog_region_8");
+   p.consolecommand("set input 1 tog_region_uni 0"); p.consolecommand("set input numpad1 tog_region_uni 0");  // was tog_region_1
+   p.consolecommand("set input 2 tog_region_uni 1"); p.consolecommand("set input numpad2 tog_region_uni 1");  // was tog_region_2
+   p.consolecommand("set input 3 tog_region_uni 2"); p.consolecommand("set input numpad3 tog_region_uni 2");  // was tog_region_3
+   p.consolecommand("set input 4 tog_region_uni 3"); p.consolecommand("set input numpad4 tog_region_uni 3");  // was tog_region_4
+   p.consolecommand("set input 5 tog_region_uni 4"); p.consolecommand("set input numpad5 tog_region_uni 4");  // was tog_region_5
+   p.consolecommand("set input 6 tog_region_uni 5"); p.consolecommand("set input numpad6 tog_region_uni 5");  // was tog_region_6
+   p.consolecommand("set input 7 tog_region_uni 6"); p.consolecommand("set input numpad7 tog_region_uni 6");  // was tog_region_7
+   p.consolecommand("set input 8 tog_region_uni 7"); p.consolecommand("set input numpad8 tog_region_uni 7");  // was tog_region_8
 // --------- group 2 ---------------------------------------------------
    p.consolecommand("set input u tog_lockz");
    p.consolecommand("set input o tog_lockxy");
@@ -1483,6 +1574,7 @@ exec function tog_ignore(){
 
 exec function tog_digzoom(){
    mb_fail_confirm();
+   if(mode_oper==2) return;
    key_when = 0.3; last_kw = kw_z;
    if(!ena_2xzoom){
       ena_2xzoom = true;
@@ -1536,11 +1628,6 @@ exec function tog_mark_region(){
    ena_tex_mark = !ena_tex_mark;
 }
 
-exec function mark_current_region(){
-   mb_fail_confirm();
-   if(mode_oper!=2) return;
-   key_when = 0.3; last_kw = kw_m;
-}
 
 exec function tog_lockz(){
    mb_fail_confirm();
@@ -1850,7 +1937,7 @@ defaultproperties{
   mode_autospawn=0
   autospawn_interval=192.0
   laser_wall_dist=0.0
-  laser_ray_length=0.0
+  laser_ray_length=32.0
   mode_all_layers=3
   mode_oper=0
   mode_confirm=0
@@ -1866,6 +1953,7 @@ defaultproperties{
   PickupAmmoCount=9999
   ena_prod=false
   PickupMessage=AreaMap CT scan tool. Enter Q in console for more info.
+
   region_align(0)=(X=275.0,Y=0.0)
   region_align(1)=(X=-275.0,Y=0.0)
   region_align(2)=(X=0.0,Y=275.0)
@@ -1874,6 +1962,34 @@ defaultproperties{
   region_align(5)=(X=0.0,Y=-275.0)
   region_align(6)=(X=275.0,Y=-275.0)
   region_align(7)=(X=-275.0,Y=-275.0)
+
+  enab_region(0)=0
+  enab_region(1)=0
+  enab_region(2)=0
+  enab_region(3)=0
+  enab_region(4)=0
+  enab_region(5)=0
+  enab_region(6)=0
+  enab_region(7)=0
+  enab_region(8)=0
+  enab_region(9)=0
+//var float region_when[8];   // timestamp of creation
+  region_scale(0)=16.0;
+  region_scale(1)=16.0;
+  region_scale(2)=16.0;
+  region_scale(3)=16.0;
+  region_scale(4)=16.0;
+  region_scale(5)=16.0;
+  region_scale(6)=16.0;
+  region_scale(7)=16.0;
+  region_sizetex(0)=128;
+  region_sizetex(1)=128;
+  region_sizetex(2)=128;
+  region_sizetex(3)=128;
+  region_sizetex(4)=128;
+  region_sizetex(5)=128;
+  region_sizetex(6)=128;
+  region_sizetex(7)=128;
 
 }
 
