@@ -1,13 +1,7 @@
 class AreaMapScan extends weapon config(scitools);
 // todo laser2 mwheel not working (wrong coords of spawn/destroy)
-// todo M key mark current
-// todo defaults mark[all 8] xpos ypos
-// todo areaz array which acceps n_mark (byte or enum)
 // todo test autospawn wont spam in water/fly
 // todo make strictwall
-// ???? vert_discretization switch
-// ???? floordist behavior (classic/narrow/narrower)
-// todox F7 again wont cancel
 // todo manual diag mode, <use this floor> key/cmd
 
 #exec texture import file="textures\scipixel.png"    name="scipixel"    package="scitools" mips=1 flags=0 btc=-2
@@ -22,22 +16,15 @@ var HUD oldHUD;                      // used for menu-related hud setup transfer
 var class<HUD> oldHUDType;
 var byte n_layerz,done_layerz;       // selected/shot to png layers
 var globalconfig float vert_discretization; // AreaZ responsive map sensitivity
-var globalconfig bool bClassicMode;  // place DPNs dpn_addz_classic from floor instead of narrow,
-                                     // also don't mutate pathnodes already placed in level, use them as-is
+var globalconfig float autofall_floordist;
 var globalconfig bool bDisableAllBtnsNotify; // prio over 2 others
-var globalconfig bool bDisableLRmouseNotify;  // todo them
+var globalconfig bool bDisableLRmouseNotify;
 var globalconfig bool bEnableMmouseNotify;
 var globalconfig bool bUseUntrigger;
-
 var int presets_z[64];               // selectable layers z
 var byte presets_nmax;               // selectable total (inclusive, lay0...lay19 = 20 layers)
-
 var float global_offset_x,global_offset_y; // map center vs world position for texture
-var float marked_offset_x,marked_offset_y; // map center vs world position for marked area
-var float last_mark_timestamp;             // marked area unique label
 var float scrshot_timer;             // wait after sshot to flush disk
-var byte last_mark_resolution;       // marked area known worldscale
-var int last_mark_texture;           // marked area known size_tex
 // new code ----------------
 var byte enab_region[10];            // because we use 9 as noregion index;
                                      // here and further, enab_ = ena_byte type because bool[] prohibited
@@ -45,25 +32,26 @@ var byte enab_region[10];            // because we use 9 as noregion index;
                                      // todo: do not show even tho enabled, if nonmarkup mode
                                      // todo: 1-8 keys toggle, m key just overwrite align
 var vector2d region_align[8];
-// id ????
 var string region_texture[8];
-var float region_when[8];   // timestamp of creation
 var float region_scale[8];   // as SHR_factor behave
 var int region_sizetex[8];
-
+var byte region_usefloor[64];        // num of n_layerz used in this alignz slot, any 0-63
+var byte region_usedby[64];          // num of n_region preset which occupy above mem, 0-1 - region, 9 - free
+var byte alignz_seek;                // mem write pointer
 // -------------------------
 // todo rename markedarea to region
 var byte n_region;
 
-var byte mode_oper;                  // 0=build,   1=diag,     2=markup,   3=prod,   4=pre-diag
-var byte mode_confirm;               // 0=intact/reset, 1=doit, 2=yesimsurebitch, 3=ujustfuckedmeaskingthis, 4=reserved
+var enum EOper{ MO_Scan, MO_Diag, MO_Mark, MO_Prod, MO_WantDiag, MO_LifetimeCfg} mode_oper;
+var enum ELTCfg{ LTC_Floordist, LTC_ZSetDiscr, LTC_ProdSHR} mode_ltcfg;
+var enum EConf{ MC_Reset, MC_Doit, MC_Yesimsure, MC_Stopfuckingasking, MC_Confirmed} mode_confirm;
 var byte mode_player;                // 0=hide,    1=show,     2=alert,    3=pointer
-var byte mode_all_layers;            // 0=current, 1=all fast, 2=all full, 3=all client-like
+var enum ERayPrc { RP_SelFull, RP_AllFast, RP_AllFullEco, RP_ClientLike, RP_ClientFull} mode_rayprocess;
 var byte mode_mwheel;                // 0=x,       1=y,        2=layer
 var bool ena_lockz;                  // true=snap selz to playerz
 var bool ena_lockxy;             // true=snap map center to player (lock xy)
 var byte mode_dpn_fall;              // 0=falling, 1=floating, 2=inheritz
-var bool ena_tex_mark;               // marked area visible if true
+//var bool ena_tex_mark;               // marked area visible if true
 var bool ena_2xzoom;                 // half tex resolution (digital zoom)
 var bool ena_4xzoom;                 // quarter
 var bool pw_sens_fire;               // true if user holds weaponfire
@@ -79,13 +67,14 @@ var byte autofly_trig;
 var byte mode_step,mode_texsize;     // mode number of step/texture
 var int size_step,size_tex;          // value of step/texture
 var byte map_resolution;
-var string state_mapdisplay[5];
 var string new_clientmsg[2];         // notifications
 var float clientmsg_timer;
 var float last_tick_f,last_tick_f_upd_timer; // framerate counter related
 var float laser_wall_dist;           // how far to place laser blast off walls, mode 1
 var float laser_ray_length;          // how close to place laser blast to player, mode 2
-var byte shr_div_coords;             // 3=div8, 96% of foundry fits in 1024x1024; 4=div16 etc
+var byte SHR_Factor_scanmap;         // 3=div8, 96% of foundry fits in 512x512; 4=div16 etc
+var byte SHR_Factor_prodmap;
+const    SHR_Factor_default=2;
 var STLight lightbeam;               // light blast
 var STLaser laserdot;                // laser blast
 var byte mode_laser;                 // 0=off, 1=inf, 2=finite
@@ -121,17 +110,15 @@ var color           // UI color, set in postbeginplay()
    pc_yellow,  pc_yellow_f,  pc_pink,    pc_pink_f,    pc_bg,    pc_fill_bg,
    pc_cyan,    pc_cyan_f,    pc_pinker,  pc_pinker_f,  pc_gray,
    pc_teal,    pc_teal_f,    pc_red,     pc_red_f,     pc_wh,    pc_wh_f;
-enum keywhere{      // UI key event for anim
+enum EKeyWhere{      // UI key event for anim
    kw_f1, kw_1, kw_7, kw_u, kw_r, kw_f,
    kw_f2, kw_2, kw_8, kw_o, kw_t, kw_v,
-   kw_f7, kw_3, kw_z, kw_y, kw_h, kw_m,
-   kw_f4, kw_4, kw_x, kw_q, kw_lmb, kw_rmb,
+   kw_f7, kw_3, kw_z, kw_y, kw_h, kw_m, kw_n,
+   kw_f4, kw_4, kw_x, kw_q, kw_lmb, kw_mmb, kw_rmb,
    kw_f5, kw_5, kw_b, kw_none, kw_ijkl, kw_pupd,
-   kw_f8, kw_6, kw_g, kw_ent, kw_p};
-var float
-   key_when;
-var keywhere
-   last_kw;
+   kw_f8, kw_6, kw_g, kw_ent, kw_p, kw_f6};
+var float      key_when;
+var EKeyWhere  last_kw;
 // ============================================================================================================
 const pad_glob = 10; // <-- padding;  dimensions,       texdata             viewport
 const pad_view = 12;            const fonw = 16;  const fillw = 23;  const vieww = 665;
@@ -151,27 +138,42 @@ const y_hdr_place = 827;    const x_hdr_place = 74;    /* xpos 4 */   const x_co
 const y_hdr_mouse = 827;    const x_hdr_mouse = 490;   /* xpos 30 */  const x_col_mouse = 458;
 const x_rcol = 1719; // right sidebar xpos 0; (3*pad_glob)+vieww+max_size_tex
 const y_rcol_texdata = 10; // =pad_glob
-const y_rcol_texdata_fill = 78; // =(pad_glob*2)+(fonh*2)
-const y_rcol_player = 279; // =fill+(9*dm_tfh)+(8*1)+pad_glob
-const y_rcol_scope = 424; /* 5 lines lower */           const y_clientmsg = 90; // =(pad_glob*2)+(fonh*2)+pad_view
-const y_rcol_align = 540; /* 4 lines lower */           const y_statusbar = 412; // =y_vp+viewh-pad_view-fonh
-const y_rcol_region = 685; /* 4 lines lower */          const x_view_lpos = 22; //=pad_glob+pad_view
+const y_rcol_texdata_fill = 49; // =(pad_glob*2)+(fonh)
+const y_rcol_player = 308; // =fill+(9*fillh)+(8*1)+pad_glob (+fonh)
+const y_rcol_scope = 453; /* 5 lines lower */           const y_clientmsg = 90; // =(pad_glob*2)+(fonh*2)+pad_view
+const y_rcol_align = 569; /* 4 lines lower */           const y_statusbar = 412; // =y_vp+viewh-pad_view-fonh
+const y_rcol_region = 714; /* 4 lines lower */          const x_view_lpos = 22; //=pad_glob+pad_view
 const y_rcol_lifetime = 830; /* 5 lines lower */           const x_view_rpos = 643; //=vieww-pad_glob+pad_view
 const y_rcol_noob = 1041; // =hardcode_scrh-pad_glob-fonh   
 // ============================================================================================================
 // USER OPERATION MODE SWITCHING
 // ============================================================================================================
 exec function tog_opermode_uni(byte sw_to_oper){
-   local byte i;
+//   local byte i;
    if(mode_oper == sw_to_oper) return;
-   if(mode_oper==4){ mode_oper=0; return; }
-   key_when = 0.3;
-   switch(sw_to_oper)              {
-   case 0: last_kw=kw_f1;                          mode_oper=0; n_region=9; ena_2xzoom=true;  ena_4xzoom=false;
-           shr_div_coords=2; /* todo lifetime shr, not 2 */   upd_resolution();  for(i=0;i<8;i++) enab_region[i]=0;  break;
-   case 1: last_kw=kw_f7;                          mode_oper=4; n_region=9;                                     break;
-   case 2: last_kw=kw_f4; if(mode_oper==4) return; mode_oper=2; n_region=0; ena_2xzoom=false; ena_4xzoom=false; break;
-   case 3: last_kw=kw_f8; if(mode_oper==4) return; mode_oper=3; n_region=0;                                     break; }
+   if(mode_oper==MO_WantDiag){ mode_oper=MO_Scan; return; }
+   key_when = 0.3;        switch(sw_to_oper){
+   case 0: last_kw=kw_f1;    mode_oper=MO_Scan;         n_region=9;     ena_2xzoom=true;  ena_4xzoom=false;
+           SHR_Factor_scanmap=SHR_Factor_default;    upd_resolution();  ena_lockz=true;   ena_lockxy=true;
+           mode_rayprocess = RP_ClientLike;             mode_player=3;
+         /*  for(i=0;i<8;i++) enab_region[i]=0;  */                                                           break;
+   case 1: last_kw=kw_f7;    mode_oper=MO_WantDiag;     n_region=9;
+
+
+                                                                                                              break;
+   case 2: last_kw=kw_f4; if(mode_oper==MO_WantDiag) return;
+                             mode_oper=MO_Mark;         n_region=0;      ena_2xzoom=false; ena_4xzoom=false;
+           SHR_Factor_scanmap=SHR_Factor_prodmap;    upd_resolution();   ena_lockz=false;  ena_lockxy=false;
+           mode_rayprocess = RP_AllFast;                mode_player=3;   mode_laser=0;                        break;
+   case 3: last_kw=kw_f8; if(mode_oper==MO_WantDiag) return;
+                             mode_oper=MO_Prod;         n_region=0;      ena_2xzoom=false; ena_4xzoom=false;
+           SHR_Factor_scanmap=SHR_Factor_prodmap;    upd_resolution();   ena_lockz=false;  ena_lockxy=false;
+           mode_rayprocess = RP_SelFull;                mode_player=0;   mode_laser=0;                        break;
+   case 4: last_kw=kw_f6; if(mode_oper==MO_WantDiag) return;
+                          if(mode_oper!=MO_LifetimeCfg){ mode_oper=MO_LifetimeCfg; mode_ltcfg=LTC_Floordist; }
+                 else{       mode_oper=MO_Scan;         n_region=9;      ena_2xzoom=true;  ena_4xzoom=false;
+           SHR_Factor_scanmap=SHR_Factor_default;    upd_resolution();   ena_lockz=true;   ena_lockxy=true;
+           mode_rayprocess = RP_ClientLike;             mode_player=3;         }                              break; }
 } 
 // exec function tog_opermode_scan(){
 //    local byte i;
@@ -190,18 +192,32 @@ exec function tog_opermode_uni(byte sw_to_oper){
 // USER REGION SELECT/TOGGLE + CONFIRM MEM-DESTRUCTIVE ACTIONS
 // ============================================================================================================
 exec function tog_region_uni(byte new_nregion){
+   local bool bFailConf;
    if(new_nregion>7) return;
-   if(mode_oper==4 && new_nregion<=3) goto user_validation_uni;
-   if(mode_oper!=2 && mode_oper!=3) return;
+   if(mode_oper==MO_WantDiag && new_nregion<=3) goto user_validation_uni;
+   if(mode_oper!=MO_Mark && mode_oper!=MO_Prod) return;
    n_region = new_nregion;
    enab_region[n_region] = enab_region[n_region]==1 ? 0 : 1;
    return;
    user_validation_uni:
-   if(mode_confirm==new_nregion){
-      mode_confirm = new_nregion+1;
-      if(mode_confirm==4) do_diag_z();
-   }else
-      do_fail_confirm();
+   bFailConf = false;
+   switch(new_nregion+1){
+      case 1: if(mode_confirm==MC_Reset)             mode_confirm=MC_Doit;              else bFailConf = true; break;
+      case 2: if(mode_confirm==MC_Doit)              mode_confirm=MC_Yesimsure;         else bFailConf = true; break;
+      case 3: if(mode_confirm==MC_Yesimsure)         mode_confirm=MC_Stopfuckingasking; else bFailConf = true; break;
+      case 4: if(mode_confirm==MC_Stopfuckingasking) mode_confirm=MC_Confirmed;         else bFailConf = true; break;
+   }
+   if(bFailConf) do_fail_confirm();
+   if(mode_confirm==MC_Confirmed){
+      do_diag_z();
+      tog_opermode_uni(2);
+   }
+// if(mode_confirm==new_nregion){
+//      mode_confirm = new_nregion+1;
+//      if(mode_confirm==4) do_diag_z();
+//   }
+// else
+//   do_fail_confirm();
 }
 
 // exec function tog_region_1(){
@@ -250,7 +266,24 @@ exec function tog_region_8(){
      n_region = 7;  enab_region[n_region] = enab_region[n_region]==1 ? 0 : 1;
 } */
 // ============================================================================================================
-// USER REGION SELECT/TOGGLE + CONFIRM MEM-DESTRUCTIVE ACTIONS
+// FLOOR
+// ============================================================================================================
+exec function tog_layerz_assign(){
+   local byte mod_pointer;
+   if(alignz_seek>0) mod_pointer=1; else mod_pointer=0;
+   if( presets_z[n_layerz]==presets_z[region_usefloor[alignz_seek-mod_pointer]]
+    && n_region==region_usedby[alignz_seek-mod_pointer]){
+      region_usefloor[alignz_seek-mod_pointer] = 0;           // already exists, clear usagemap element
+      region_usedby[alignz_seek-mod_pointer] = 9;
+      if(alignz_seek>0) alignz_seek--;
+   }else{
+      region_usefloor[alignz_seek] = n_layerz;    // write
+      region_usedby[alignz_seek] = n_region;
+      if(alignz_seek<62) alignz_seek++;
+   }
+}
+// ============================================================================================================
+// USER MACROS
 // ============================================================================================================
 exec function init(){  // Used for recall hotkeys upon loadgame if read-only user.ini
    playselect();
@@ -272,13 +305,6 @@ function performdodge(playerpawn p){
                    (forcedodge_ydir*1.5*p.groundspeed+p.velocity dot y)*y;
       p.velocity.z = 160;
       p.PlayOwnedSound(p.JumpSound, SLOT_Talk, 1.0, true, 800, 1.0);
-/*      if(xdir == 0){
-         if(ydir == 1)  p.PlayDodge(DODGE_Left);
-         if(ydir == -1) p.PlayDodge(DODGE_Right);
-      }else{
-         if(xdir == -1) p.PlayDodge(DODGE_Back);
-         if(xdir == 1)  p.PlayDodge(DODGE_Forward);
-      }                                            */
       p.SetPhysics(PHYS_Falling);
    }else if(p.Physics == PHYS_Swimming){
       if(!wforcedodge_ready) return;
@@ -293,33 +319,67 @@ function performdodge(playerpawn p){
    }
 }
 
-function mb_fail_confirm(){  // called from all kbd functions
-   if(mode_oper!=4) return;
+function bool mb_fail_confirm(){  // called from all kbd functions
+   if(mode_oper!=MO_WantDiag) return false;
    do_fail_confirm();
+   return true;
 }
 function do_fail_confirm(){
-   mode_confirm = 0;         // reset confirm progress if any wrong key
-   mode_oper = 0;
+   mode_confirm = MC_Reset;         // reset confirm progress if any wrong key
+   mode_oper = MO_Scan;
    new_clientmsg[0] = "AreaZ[] set diag sequence";
    new_clientmsg[1] = "has been cancelled.";
    clientmsg_timer = 2.5;
 }
-function upd_size_step(){         switch(mode_step){
+function upd_size_step(){  switch(mode_step){
    case 0: size_step = map_resolution*1;  break;
    case 1: size_step = map_resolution*8;  break;
-   case 2: size_step = map_resolution*64; break;   }   }
-function upd_size_tex(){       switch(mode_texsize){
-   case 0: size_tex = 256;                break;
-   case 1: size_tex = 512;                break;
-   case 2: size_tex = 1024;               break;   }   }
-function upd_resolution(){   switch(shr_div_coords){
-   case 1: map_resolution = 2;            break;
-   case 2: map_resolution = 4;            break;
-   case 3: map_resolution = 8;            break;
-   case 4: map_resolution = 16;           break;
-   case 5: map_resolution = 32;           break;
-   case 6: map_resolution = 64;           break;
-   case 7: map_resolution = 128;          break;   }   }
+   case 2: size_step = map_resolution*64; break; }
+}
+function upd_size_tex(){  switch(mode_texsize){
+   case 0: size_tex = 256;  break;
+   case 1: size_tex = 512;  break;
+   case 2: size_tex = 1024; break; }
+}
+function upd_resolution(){  switch(SHR_Factor_scanmap){
+   case 1: map_resolution = 2;   break;
+   case 2: map_resolution = 4;   break;
+   case 3: map_resolution = 8;   break;
+   case 4: map_resolution = 16;  break;
+   case 5: map_resolution = 32;  break;
+   case 6: map_resolution = 64;  break;
+   case 7: map_resolution = 128; break; }
+}
+function color color_region(byte num, bool bfade){  switch(num){
+   case 0: return !bfade ? pc_blue   : pc_blue_f;   break;
+   case 1: return !bfade ? pc_yellow : pc_yellow_f; break;
+   case 2: return !bfade ? pc_cyan   : pc_cyan_f;   break;
+   case 3: return !bfade ? pc_orange : pc_orange_f; break;
+   case 4: return !bfade ? pc_green  : pc_green_f;  break;
+   case 5: return !bfade ? pc_pink   : pc_pink_f;   break;
+   case 6: return !bfade ? pc_red    : pc_red_f;    break;
+   case 7: return !bfade ? pc_brown  : pc_brown_f;  break;
+   case 9: return !bfade ? pc_brown  : pc_brown_f;  break; } return pc_gray;
+}
+function string now_confirmed(EConf conf_stage){  switch(conf_stage){
+   case MC_Reset:             return "0"; break;
+   case MC_Doit:              return "1"; break;
+   case MC_Yesimsure:         return "2"; break;
+   case MC_Stopfuckingasking: return "3"; break;
+   case MC_Confirmed:         return "4"; break; } return "0";
+}
+function string now_rayprocessing(ERayPrc rp_state){  switch(rp_state){
+   case RP_SelFull:    return "SEL FULL"; break;
+   case RP_AllFast:    return "ALL FAST"; break;
+   case RP_AllFullEco: return "ALL STD"; break;
+   case RP_ClientLike: return "RELEVANT"; break;
+   case RP_ClientFull: return "REL FULL"; break; } return "UNKNOWN";
+}
+function int maptex_centering(int now_size_tex){  switch(now_size_tex){
+   case 256: return 384; break;
+   case 512: return 256; break;
+   case 1024: return 0; break; } return 0;
+}
 // ============================================================================================================
 
 exec function sci_forcedodge(){
@@ -337,27 +397,15 @@ exec function sci_forcedodge(){
 }
 
 exec function mark_current_region(){
-   mb_fail_confirm();
-   if(mode_oper!=2) return;
+   if(mb_fail_confirm()) return;
+   if(mode_oper!=MO_Mark) return;
    key_when = 0.3; last_kw = kw_m;
-
    if(n_region>7) return;  // prohibit access outside of array
    enab_region[n_region] = 1;
    region_align[n_region].x = global_offset_x;
    region_align[n_region].y = global_offset_y;
-   region_when[n_region] = level.timeseconds;
-   region_scale[n_region] = map_resolution;        // as SHR_factor behave, todo inherit from lifetime, not current
+   region_scale[n_region] = map_resolution; //SHR_Factor_prodmap;   // behave as SHR_factor
    region_sizetex[n_region] = size_tex;
-// ena_tex_mark = true; // todo mb shit
-/*  / new code ----------------
-var byte enab_region[10];            // because we use 9 as noregion index;
-                                     // todo: affect [8] regions only, never go outside array
-                                     // todo: do not show even tho enabled, if nonmarkup mode
-                                     // todo: 1-8 keys toggle, m key just overwrite align
-// id ????
-var string region_texture[8];        */
-
-// todo display all regions
 }
 
 exec function prod(){
@@ -382,7 +430,7 @@ exec function prod(){
       log(" }",'AMS');
       log(" ",'AMS');
       log(" defaultproperties{",'AMS');
-      log("   SHR_factor="$shr_div_coords,'AMS');
+      log("   SHR_factor="$SHR_Factor_prodmap,'AMS');
       log("   FloorHeight="$vert_discretization,'AMS');
    for(i=0; i<=presets_nmax; i++){
       ts = ""; if(i<10) ts $= "0"; ts $= string(i);
@@ -420,15 +468,15 @@ exec function q(){
    p.clientmessage("AMS use PathNode runtime-placeable equivalent as epicenters of raytracing");
    p.clientmessage(" to construct hull/walls and solid collision. Due to collision reactivity with");
    p.clientmessage(" bCollideActors, most puckups and deco are auto-removed. You can clean excessive");
-   p.clientmessage(" in PNG editor.");
+   p.clientmessage(" scan obstacles in PNG editor.");
    p.clientmessage("Your task is to spawn PathNodeRuntime, or dummy pathnodes, DPN, on level -");
    p.clientmessage(" lots enough to do effective walls scan, though less enough to don't cause");
-   p.clientmessage(" freezing. Always remember, Unreal Virtual Machine works in single-thread");
+   p.clientmessage(" FPS freeze. Always remember, Unreal Virtual Machine works in single-thread");
    p.clientmessage(" manner on single core of CPU. Because of this, even if you have very powerful");
    p.clientmessage(" processor such as latest Ryzens, excessive raycasting will eat framerate.");
-   p.clientmessage("In build, or DPN placement mode, taken max measures to improve performance.");
-   p.clientmessage(" Laggy performance while max quality mode won't be long, after exporting done");
-   p.clientmessage(" AMS will return to build mode.");
+   p.clientmessage("In build, or DPN placement mode, many measures were taken to minimize load.");
+   p.clientmessage(" Laggy performance while max quality mode won't be long; after export is");
+   p.clientmessage(" done, AMS will return to build mode.");
    p.clientmessage("This version almost got rid of scanning artifacts, but this may lead to some");
    p.clientmessage(" objects inconsistency. This behavior fixed by special mode of scanning actors");
    p.clientmessage(" when placing these, called strict walls/directional anywalls. Even hill/slope");
@@ -524,7 +572,7 @@ exec function q(){
    p.clientmessage(" the result, writes .uc package template and .bat script template to unreal.log;");
    p.clientmessage(" use text editor to correct these files to your needs.");
    p.clientmessage(" You can obtain list of screenshots sorted by creation time with command:");
-   p.clientmessage(" X:\%unreal%\system\screenshots> dir /od /tc /b /a-d > file.bat");
+   p.clientmessage(" X:\\\%unreal%\\system\\screenshots> dir /od /tc /b /a-d > file.bat");
    p.clientmessage(" ");
    p.clientmessage("Config variables (scitools.ini):");
    p.clientmessage("vert_discretization - AreaZ sensitivity, the height of zone where actual map");
@@ -589,10 +637,9 @@ exec function q(){
    p.clientmessage("After all data prepared, AMS works unattended, just enable prod mode and");
    p.clientmessage(" wait for all screenshots will be taken. Then you can cut them, edit if");
    p.clientmessage(" you want in any graphics software, then prepare your package files and");
-   p.clientmessage(" use UCC to compile.");
-   p.clientmessage("For cutting screenshoted maps (from fullscreen FHD to square map region),");
-   p.clientmessage(" FFMPEG is required. It can be installed from");
-   p.clientmessage(" https://www.gyan.dev/ffmpeg/builds/");
+   p.clientmessage(" use UCC to compile. For cutting screenshoted maps (from fullscreen FHD to");
+   p.clientmessage(" square map region), FFMPEG is required.");
+   p.clientmessage(" It can be installed from https://www.gyan.dev/ffmpeg/builds/");
 
    return;
    p.clientmessage("This tool use PathNode and PathNodeRuntime objects as epicenters of raytracing the map. PathNodeRuntime actors");
@@ -763,7 +810,7 @@ function trigger FindTrigger(vector search_location){
 }
 
 exec function tog_light(){
-   mb_fail_confirm();
+   if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_y;
    if(lightbeam == none) return;
    if(lightbeam.LightType == LT_None)
@@ -793,7 +840,7 @@ function int draw_key_help(canvas c, color dc, string hk, string desc, int from_
    return ly+fonh;            // move 1 ypos down
 }
 
-function int draw_key_action(canvas c, color dc, keywhere evs, string hk, string desc, int from_x, int from_y){
+function int draw_key_action(canvas c, color dc, ekeywhere evs, string hk, string desc, int from_x, int from_y){
    local int desc_x,lx,ly;
    desc_x = (len(hk)+1)*fonw; // offset 1 xpos to descr
    lx = from_x; ly = from_y;
@@ -804,11 +851,13 @@ function int draw_key_action(canvas c, color dc, keywhere evs, string hk, string
       if(key_when >= 0.05)  c.drawcolor = pc_cyan;                      // frame 3
       dka_pc_ready:
    }else{
-      c.drawcolor = pc_wh;                          // dim white shithacks:
-      if(evs==kw_t && sens_mov==none) c.drawcolor = pc_gray; // no mover to ignore
-      if(evs==kw_ijkl && ena_lockxy)  c.drawcolor = pc_gray; // no ijkl, snapped to player
-      if(evs==kw_m && mode_oper!=2)   c.drawcolor = pc_gray; // not in markup mode
-      if(evs==kw_p && dc!=pc_orange)  c.drawcolor = pc_gray; // zone is not water
+      c.drawcolor = pc_wh;                                  // dim white keybar shithacks:
+      if( evs==kw_t && sens_mov==none) c.drawcolor = pc_gray; // no mover to ignore
+      if( evs==kw_ijkl && ena_lockxy && mode_oper!=MO_LifetimeCfg)
+                                       c.drawcolor = pc_gray; // no ijkl, snapped to player
+      if((evs==kw_m || evs==kw_ent) && mode_oper!=MO_Mark)    // not in markup mode for mark/assign
+                                       c.drawcolor = pc_gray;
+      if( evs==kw_p && dc!=pc_orange)  c.drawcolor = pc_gray; // zone is not water
    }
    c.setpos(lx,ly);  c.drawtext(hk);
    if(desc=="") return ly;    // abort if empty
@@ -818,11 +867,20 @@ function int draw_key_action(canvas c, color dc, keywhere evs, string hk, string
    return ly+fonh;            // move 1 ypos down
 }
 
+function draw_lifetime_sel(canvas c, ELTCfg now_ltc, int xpos, int ypos){
+   if(mode_oper!=MO_LifetimeCfg) return;
+   if(mode_ltcfg!=now_ltc) return;
+   c.setpos(xpos-112, ypos);
+   c.drawcolor=pc_wh; c.drawtext("---->");
+}
+
 function postrender(canvas c){
    local int upx,upy; // ui pos x,y
    local color pc_tmp;  // tmp presetcolor
    local vector vect_tmp;
    local bool bool_tmp;
+   local float resolution_error;
+   local int region_area;
    // new vars ends
    local actor rtarg;
    local vector x,y,z,endtrace,hl,hn;
@@ -851,8 +909,6 @@ function postrender(canvas c){
    bOwnsCrosshair=true;
    c.font = inv_finfo.GetInvFont();
    pn_tot = 0;
-// ================================================================================================== NEW CODE
-// foreach allactors(class'pathnode',pns) if(!pns.isa('pathnoderuntime')) pn_tot++; // we dont need to count static, irrelevant
    // overall bg ----------------------------------------------------------------------
    c.drawcolor = pc_bg;
    c.setpos(0,0); c.drawtile(texture'scipixel', c.clipx, c.clipy, 0,0,4,4);
@@ -862,11 +918,11 @@ function postrender(canvas c){
       c.setpos(hud_maptex_offset_x,hud_maptex_offset_y);
       c.drawtile(texture'scinoblk', max_size_tex, max_size_tex, 0,0,256,256);
       c.setpos(hud_maptex_offset_x, hud_maptex_offset_y+size_tex);
-      c.drawtile(texture'scipixel', size_tex, 2, 0,0,4,4);
+      c.drawtile(texture'scipixel', size_tex+3, 3, 0,0,4,4);
       c.setpos(hud_maptex_offset_x+size_tex, hud_maptex_offset_y);
-      c.drawtile(texture'scipixel', 2, size_tex, 0,0,4,4);
+      c.drawtile(texture'scipixel', 3, size_tex, 0,0,4,4);
    }
-   c.setpos(hud_maptex_offset_x,hud_maptex_offset_y);
+   c.setpos(hud_maptex_offset_x+region_area,hud_maptex_offset_y+region_area);
    c.drawtile(texture'scipixelblk', size_tex, size_tex, 0,0,4,4);
 //----- layer raytracer ------------------------------------------------------
    sel_z = ena_lockz ? int(p.location.z - player_vs_dpn_addz) : presets_z[n_layerz]; // select scanned layer
@@ -883,7 +939,7 @@ function postrender(canvas c){
       // TODO: MANUAL Zset write mode, red/cyan apples, some sort of "use this floor".
       // TODO write doku how to define them, incl write bottom/ceil Z to paper and calc middleval, mb adjust floorheight
       // ?????????? per-layer floorheight (imo shit)
-      if(mode_all_layers==0 && nomatch_z) continue; // we maybe still process further in fullcolor map mode
+      if(mode_rayprocess==RP_SelFull && nomatch_z) continue; // we maybe still process further in fullcolor map mode
       if(!nomatch_z) pn_mz++;
 //----- dist ignorator ---------------------------------------
       x = pn.location;   // cancer code: we use x y z vars for things not meaning coords
@@ -892,7 +948,7 @@ function postrender(canvas c){
       if(ena_2xzoom) pnz = pnz>>1;          // ignore 75% of area if 2x zooming
       if(ena_4xzoom) pnz = pnz>>1;          // ignore 93% of area if 4x zooming
      // pn_rad = pnz; // ???????? no idea for what it, mb remove ???????
-      if(mode_all_layers!=0){ // always render all pathnodes in all_selected mode
+      if(mode_rayprocess!=RP_SelFull){ // always render all pathnodes in all_selected mode
          if((abs(x.x + global_offset_x) > pnz)
          || (abs(x.y + global_offset_y) > pnz)) continue;
       }  // in other modes, if PN/DPN far far outside of texture, try to eat less CPU
@@ -902,10 +958,10 @@ function postrender(canvas c){
          getaxes(r,x,y,z);
          endtrace = pn.location + 768.0*x;   // scan dist
          rtarg = trace(hl,hn,endtrace,pn.location,true);
-         hlx = (hl.x>>shr_div_coords);
-         hly = (hl.y>>shr_div_coords);
-         hlx += (size_tex>>1); hlx += (global_offset_x >> shr_div_coords);
-         hly += (size_tex>>1); hly += (global_offset_y >> shr_div_coords);
+         hlx = (hl.x>>SHR_Factor_scanmap);
+         hly = (hl.y>>SHR_Factor_scanmap);
+         hlx += (size_tex>>1); hlx += (global_offset_x >> SHR_Factor_scanmap);
+         hly += (size_tex>>1); hly += (global_offset_y >> SHR_Factor_scanmap);
          if(ena_2xzoom){
             hlx *= 2; hlx -= (size_tex>>1);
             hly *= 2; hly -= (size_tex>>1);
@@ -916,10 +972,15 @@ function postrender(canvas c){
          }
          hlx += hud_maptex_offset_x;
          hly += hud_maptex_offset_y;
+         // -----------------------------------------
+         if( hlx<hud_maptex_offset_x          || hly<hud_maptex_offset_y          ||
+             hlx>hud_maptex_offset_x+size_tex || hly>hud_maptex_offset_y+size_tex  )
+             goto skip_by_drawmap_outtexbounds;
+         // -----------------------------------------
          c.drawcolor = pc_wh;
-         if(mode_all_layers==3 && nomatch_z){
-            if       (shr_div_coords<=2) c.drawcolor = makecolor(155,203,155);  // todo change to presets
-             else if (shr_div_coords==3) c.drawcolor = makecolor(112,112,160);
+         if(mode_rayprocess==RP_ClientLike && nomatch_z){
+            if       (SHR_Factor_scanmap<=2) c.drawcolor = makecolor(155,203,155);  // todo change to presets
+             else if (SHR_Factor_scanmap==3) c.drawcolor = makecolor(112,112,160);
              else                        c.drawcolor = makecolor(80,80,128);
          }
          if(pn==laserdot) c.drawcolor = pc_pinker;
@@ -934,11 +995,12 @@ function postrender(canvas c){
                c.setpos(hlx,hly);  c.drawicon(texture'scipixel',pnz);
             }
          }
-         if(mode_all_layers!=0) pnz = advance_ray_pos_std;   // assign rays density, full quality for mode 0 only
+         skip_by_drawmap_outtexbounds:
+         if(mode_rayprocess!=RP_SelFull) pnz = advance_ray_pos_std;   // assign rays density, full quality for mode 0 only
           else pnz = advance_ray_pos_full;
-         if(mode_all_layers==1) pnz = advance_ray_pos_fast;  // skip rays in mode 1, to 8x faster
+         if(mode_rayprocess==RP_AllFast) pnz = advance_ray_pos_fast;  // skip rays in mode 1, to 8x faster
          if(nomatch_z) pnz = advance_ray_pos_fast;           // skip mismathing by z
-         if(mode_all_layers==3                               // skip in mode 3
+         if(mode_rayprocess==RP_ClientLike                               // skip in mode 3
             && vsizesq(pn.location - p.location)>max_fastscan_vsizesq) // outside max radius
                 pnz = advance_ray_pos_fast;
          if(accumulated_pw_sens_fire>timetrigger_pw_sens_fire && !nomatch_z) pnz = advance_ray_pos_full; // override to full quality
@@ -955,10 +1017,10 @@ function postrender(canvas c){
       if(k > 256) k = 256;
       for(i=0; i<k; i++){
          hl += 40*x;
-         hlx = (hl.x>>shr_div_coords);
-         hly = (hl.y>>shr_div_coords);
-         hlx += (size_tex>>1); hlx += (global_offset_x >> shr_div_coords);
-         hly += (size_tex>>1); hly += (global_offset_y >> shr_div_coords);
+         hlx = (hl.x>>SHR_Factor_scanmap);
+         hly = (hl.y>>SHR_Factor_scanmap);
+         hlx += (size_tex>>1); hlx += (global_offset_x >> SHR_Factor_scanmap);
+         hly += (size_tex>>1); hly += (global_offset_y >> SHR_Factor_scanmap);
          if(ena_2xzoom){
             hlx *= 2; hlx -= (size_tex>>1);
             hly *= 2; hly -= (size_tex>>1);
@@ -967,36 +1029,43 @@ function postrender(canvas c){
             hlx *= 2; hlx -= (size_tex>>1);
             hly *= 2; hly -= (size_tex>>1);
          }
-         hlx+=hud_maptex_offset_x; 
+         hlx+=hud_maptex_offset_x;
          hly+=hud_maptex_offset_y;
+         // -----------------------------------------
+         if( hlx<hud_maptex_offset_x          || hly<hud_maptex_offset_y          ||
+             hlx>hud_maptex_offset_x+size_tex || hly>hud_maptex_offset_y+size_tex  )
+             break; // goto skip_by_drawlaser_outtexbounds;
          pnz = 0.5;
          if(ena_2xzoom) pnz = 1.0;
          c.setpos(hlx,hly); c.drawicon(texture'scipixel',pnz);
       }
    }
-//----- patch bg position active, over tex -----------------------------------
+//----- region borders, above main texture, under menu text ------------------
+   if(mode_oper!=MO_Mark) goto skip_by_drawregion_nomarkup;
    for(i=0;i<8;i++){
 
    if(enab_region[i]==0) continue;
 // if(ena_tex_mark){
 //    marked_error = last_mark_texture - size_tex;
       marked_error = region_sizetex[i] - size_tex;
+      resolution_error = map_resolution / region_scale[i];
+      region_area = int(region_sizetex[i] / resolution_error);
 //    hlx = (global_offset_x - marked_offset_x);
 //    hly = (global_offset_y - marked_offset_y);
       hlx = (global_offset_x - region_align[i].x);
       hly = (global_offset_y - region_align[i].y);
 //    hlx = hlx >> region_shr; //shr_div_coords;
 //    hly = hly >> region_shr; //shr_div_coords;
-      hlx = hlx >> shr_div_coords; // todo if(shr_div_coords!=region_shr) warn_shr;
-      hly = hly >> shr_div_coords;
+      hlx = hlx >> SHR_Factor_scanmap; // todo if(shr_div_coords!=region_shr) warn_shr;
+      hly = hly >> SHR_Factor_scanmap;
 //    hlx += (last_mark_texture>>1);  hlx -= (marked_error>>1);
 //    hly += (last_mark_texture>>1);  hly -= (marked_error>>1);
       hlx += (region_sizetex[i]>>1);  hlx -= (marked_error>>1);
       hly += (region_sizetex[i]>>1);  hly -= (marked_error>>1);
 //    mkx = hlx - (last_mark_texture>>1);
 //    mky = hly - (last_mark_texture>>1);
-      mkx = hlx - (region_sizetex[i]>>1);
-      mky = hly - (region_sizetex[i]>>1);
+      mkx = hlx - ((region_sizetex[i]>>1)/resolution_error);
+      mky = hly - ((region_sizetex[i]>>1)/resolution_error);
 /*      if(ena_2xzoom){     // todo prohibit Z key in markup mode, always reset dzoom to 1x
 //       mkx *= 2; mkx -= (last_mark_texture>>1);
 //       mky *= 2; mky -= (last_mark_texture>>1);
@@ -1009,28 +1078,29 @@ function postrender(canvas c){
          mkx *= 2; mkx -= (region_sizetex[i]>>1);
          mky *= 2; mky -= (region_sizetex[i]>>1);
       } */
-      mkx += hud_maptex_offset_x;    // ?????????xxxxxxxxxxx
+      mkx += hud_maptex_offset_x;
       mky += hud_maptex_offset_y;
-      c.drawcolor = makecolor(255,255,192);
+//    c.drawcolor = makecolor(255,255,192);
 //    c.setpos(mkx+4, mky+1);      c.drawtext("Marked at " $ int(last_mark_timestamp) $ "s.");
-      c.setpos(mkx+4, mky+1);      c.drawtext("Marked at " $ int(region_when[i]) $ "s.");
+//    c.setpos(mkx+4, mky+1);      c.drawtext("Marked at " $ int(region_when[i]) $ "s.");
 //      c.setpos(mkx+4, mky+1 +87);  c.drawtext("Cyan border MUST disappear");
 //      c.setpos(mkx+4, mky+1 +116); c.drawtext("on edge of adjacent area.");
 //    c.setpos(mkx+4, mky-61 +last_mark_texture);     c.drawtext("Scale mismatch WILL cause");
 //    c.setpos(mkx+4, mky-61 +last_mark_texture +29); c.drawtext("positioning error.");
-      c.setpos(mkx+4, mky-61 +region_sizetex[i]);     c.drawtext("Scale mismatch WILL cause");
-      c.setpos(mkx+4, mky-61 +region_sizetex[i] +29); c.drawtext("positioning error.");
-      c.drawcolor = makecolor(192,255,192);
+//    c.setpos(mkx+4, mky-61 +region_sizetex[i]);     c.drawtext("MR="$map_resolution$" RR="$region_scale[i]);
+//    c.setpos(mkx+4, mky-61 +region_sizetex[i] +29); c.drawtext("MRE="$resolution_error);
+//    c.drawcolor = makecolor(192,255,192);
 //    c.setpos(mkx+4, mky+1 +29); c.drawtext("X: " $ int(marked_offset_x) $ "  Y: " $ int(marked_offset_y));
 //    c.setpos(mkx+4, mky+1 +58); c.drawtext("T: " $ last_mark_texture    $ "  S: " $ last_mark_resolution);
-      c.setpos(mkx+4, mky+1 +29); c.drawtext("X: " $ int(region_align[i].x) $ "  Y: " $ int(region_align[i].y));
-      c.setpos(mkx+4, mky+1 +58); c.drawtext("T: " $ region_sizetex[i]      $ "  S: " $ region_scale[i]);
-      c.drawcolor = makecolor(128,229,255);
+  //  c.setpos(mkx+4, mky+1 +29); c.drawtext("X: " $ int(region_align[i].x) $ "  Y: " $ int(region_align[i].y));
+//    c.setpos(mkx+4, mky+1 +58); c.drawtext("T: " $ region_sizetex[i]      $ "  S: " $ region_scale[i]);
+//    c.drawcolor = makecolor(128,229,255);
 //    c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', last_mark_texture, 1, 0,0,4,4); // t,l corner right
 //    c.setpos(mkx, mky-1+last_mark_texture); c.drawtile(texture'scipixel', last_mark_texture, 1, 0,0,4,4); // b,l corner right
 //    c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', 1, last_mark_texture, 0,0,4,4); // t,l corner down
 //    c.setpos(mkx-1+last_mark_texture, mky); c.drawtile(texture'scipixel', 1, last_mark_texture, 0,0,4,4); // t,r corner down
-      switch(i)                       {
+      c.drawcolor = color_region(i,false);
+/*      switch(i)                       {
          case 0: c.drawcolor = pc_blue;   break;
          case 1: c.drawcolor = pc_yellow; break;
          case 2: c.drawcolor = pc_cyan;   break;
@@ -1038,20 +1108,27 @@ function postrender(canvas c){
          case 4: c.drawcolor = pc_green;  break;
          case 5: c.drawcolor = pc_pink;   break;
          case 6: c.drawcolor = pc_red;    break;
-         case 7: c.drawcolor = pc_brown;  break;   }
-      c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', region_sizetex[i], 1, 0,0,4,4); // t,l corner right
-      c.setpos(mkx, mky-1+region_sizetex[i]); c.drawtile(texture'scipixel', region_sizetex[i], 1, 0,0,4,4); // b,l corner right
-      c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', 1, region_sizetex[i], 0,0,4,4); // t,l corner down
-      c.setpos(mkx-1+region_sizetex[i], mky); c.drawtile(texture'scipixel', 1, region_sizetex[i], 0,0,4,4); // t,r corner down
+         case 7: c.drawcolor = pc_brown;  break;   } */
+//    c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', region_sizetex[i], 1, 0,0,4,4); // t,l corner right
+//    c.setpos(mkx, mky-1+region_sizetex[i]); c.drawtile(texture'scipixel', region_sizetex[i], 1, 0,0,4,4); // b,l corner right
+//    c.setpos(mkx, mky);                     c.drawtile(texture'scipixel', 1, region_sizetex[i], 0,0,4,4); // t,l corner down
+//    c.setpos(mkx-1+region_sizetex[i], mky); c.drawtile(texture'scipixel', 1, region_sizetex[i], 0,0,4,4); // t,r corner down
+//         c.drawcolor = pc_blue;
+      c.setpos(mkx, mky);               c.drawtile(texture'scipixel', region_area, 1, 0,0,4,4); // t,l corner right
+//         c.drawcolor = pc_green;
+      c.setpos(mkx, mky-1+region_area); c.drawtile(texture'scipixel', region_area, 1, 0,0,4,4); // b,l corner right
+      c.setpos(mkx, mky);               c.drawtile(texture'scipixel', 1, region_area, 0,0,4,4); // t,l corner down
+      c.setpos(mkx-1+region_area, mky); c.drawtile(texture'scipixel', 1, region_area, 0,0,4,4); // t,r corner down
    }
+   skip_by_drawregion_nomarkup:
 // ---- texclip bg -----------------------------------------------------------
-   c.drawcolor = pc_bg;                                       // todo mb disableable
+   c.drawcolor = pc_bg;  // if disable this, region borders may go outside main texture
    c.setpos(0,0);
     c.drawtile(texture'scipixel', hud_maptex_offset_x, hardcode_scrh, 0,0,4,4);
    c.setpos(hud_maptex_offset_x, 0);
     c.drawtile(texture'scipixel', max_size_tex, hud_maptex_offset_y, 0,0,4,4);
    c.setpos(hud_maptex_offset_x, max_size_tex+hud_maptex_offset_y);
-    c.drawtile(texture'scipixel', max_size_tex, 26, 0,0,4,4);  /* 26 = tex_size end until screen end */    // ???????
+    c.drawtile(texture'scipixel', max_size_tex, 26, 0,0,4,4);  // 26 = tex_size end until screen end     // ???????
    c.setpos(max_size_tex+hud_maptex_offset_x, 0);
     c.drawtile(texture'scipixel', hardcode_scrw-max_size_tex-hud_maptex_offset_x, hardcode_scrh, 0,0,4,4);
 // ---- level nav camera -----------------------------------------------------
@@ -1080,35 +1157,37 @@ function postrender(canvas c){
    }
 // ---- banner ---------------------------------------------------------------
    c.drawcolor = pc_wh;
-   c.setpos(x_about,y_about);    c.drawtext("CT AMS v 0.4 / Leena Klammer / 2026-01-24");
+   c.setpos(x_about,y_about);      c.drawtext("CT AMS v 0.4 / Leena Klammer / 2026-01-24");
    c.drawcolor = pc_gray;
-   c.setpos(x_about,y_about+29); c.drawtext("System requirements: 1920x1080@32");
-// c.setpos(10,68);  c.drawtext("user.ini\\hudscaler must be set to 1.0");
+   c.setpos(x_about,y_about+fonh); c.drawtext("System requirements: 1920x1080@32");
 // ---- hotkeys, labels, modes -----------------------------------------------
    upx = x_hdr_oper; upy = y_hdr_oper;
    c.drawcolor = pc_green;
-   c.setpos(upx,upy); c.drawtext("Opermode:");
+   str_tmp = mode_oper==MO_LifetimeCfg ? " global behavior setup" : "";
+   c.setpos(upx,upy); c.drawtext("Opermode:"$str_tmp);
      upx = x_col_oper; upy += (pad_fonh_half+fonh);
-   pc_tmp = mode_oper==0 ? pc_green : pc_green_f;
+   pc_tmp = mode_oper==MO_Scan ? pc_green : pc_green_f;
    upy = draw_key_action(c, pc_tmp, kw_f1, "<F1>", "build",  upx, upy);
-   pc_tmp = mode_oper==1 ? pc_blue : pc_blue_f;
+   pc_tmp = mode_oper==MO_Diag ? pc_blue : pc_blue_f;
    if(mode_oper==4)
      pc_tmp = (int(level.timeseconds/0.5) % 2)==0 ? pc_blue : pc_cyan;   // blink nowentering mode
    upy = draw_key_action(c, pc_tmp,  kw_f7, "<F7>", "diag",   upx, upy);
-   pc_tmp = mode_oper==2 ? pc_green : pc_green_f;
+   pc_tmp = mode_oper==MO_Mark ? pc_green : pc_green_f;
    upy = draw_key_action(c, pc_tmp, kw_f4, "<F4>", "markup", upx, upy);
-   pc_tmp = mode_oper==3 ? pc_green : pc_green_f;
+   pc_tmp = mode_oper==MO_Prod ? pc_green : pc_green_f;
    upy = draw_key_action(c, pc_tmp, kw_f8, "<F8>", "prod",   upx, upy);
    // -------------------
+   if(mode_oper==MO_LifetimeCfg) goto skip_by_drawkeys_lifetimecfg;
    upx = x_hdr_map_ctl; upy = y_hdr_map_ctl;
    c.drawcolor = pc_blue;
    c.setpos(upx,upy); c.drawtext("Map ctl:");
      upx = x_col_map_ctl; upy += (pad_fonh_half+fonh);
-   upy = draw_key_action(c, pc_blue, kw_z, "<Z>", "dzoom",  upx, upy);
+   upy = draw_key_action(c, pc_blue, kw_z, "<Z>", "pxzoom",  upx, upy);
    upy = draw_key_action(c, pc_blue, kw_x, "<X>", "uuzoom", upx, upy);
    upy = draw_key_action(c, pc_blue, kw_b, "<B>", "step",   upx, upy);
    upy = draw_key_action(c, pc_blue, kw_g, "<G>", "texture",upx, upy); upx -= (fonw*2);
-   upy = draw_key_action(c, pc_blue_f, kw_ent, "<Ent>", "assign L",upx, upy);
+   pc_tmp = mode_oper==MO_Mark ? pc_blue : pc_blue_f;
+   upy = draw_key_action(c, pc_tmp, kw_ent, "<Ent>", "assign L",upx, upy);
    // -------------------
    upx = x_hdr_lvl_ctl; upy = y_hdr_lvl_ctl;
    c.drawcolor = pc_orange;
@@ -1143,8 +1222,10 @@ function postrender(canvas c){
    if(mode_laser==2)  str_tmp $= ": finite +"$int(laser_ray_length);
    if(mode_laser==0){ str_tmp $= " off"; pc_tmp = pc_yellow_f; }
    upy = draw_key_action(c, pc_tmp, kw_q,  "<Q>", str_tmp,  upx, upy);
-   pc_tmp = mode_oper!=2 ? pc_green_f : pc_green;
-         draw_key_action(c, pc_tmp, kw_m,  "<M>", "mark reg",  upx, upy);
+   pc_tmp = mode_oper!=MO_Mark ? pc_green_f : pc_green;
+   upy = draw_key_action(c, pc_tmp, kw_m,  "<M>", "mark reg",  upx, upy);
+   pc_tmp = mode_oper==MO_Scan ? pc_brown : pc_brown_f;
+         draw_key_action(c, pc_tmp, kw_n,  "<N>", "Zset DPN",  upx, upy);
    upx = x_hdr_region;
    pc_tmp = pc_orange;                                      // shithack: adjust pc_tmp to trigger pc_wh replacement
    if(region.zone!=none){ if(!region.zone.bwaterzone) pc_tmp = pc_orange_f; }  // and dont access zone handle again
@@ -1152,7 +1233,7 @@ function postrender(canvas c){
    // -------------------
    upx = x_hdr_region; upy = y_hdr_region;
    c.drawcolor = pc_green;
-   bool_tmp = (mode_oper!=2 && mode_oper!=3);
+   bool_tmp = (mode_oper!=MO_Mark && mode_oper!=MO_Prod);
    if(bool_tmp) c.drawcolor = pc_yellow_f;
    c.setpos(upx,upy); c.drawtext("Region+1:");
    if(bool_tmp) goto skip_noregion_num;
@@ -1164,25 +1245,9 @@ function postrender(canvas c){
       c.setpos(upx+(k*fonw),upy); c.drawtext("< >");
    }
    for(i=0;i<8;i++){
-      switch(i){
-         case 0: c.drawcolor = pc_blue_f;   break;
-         case 1: c.drawcolor = pc_yellow_f; break;
-         case 2: c.drawcolor = pc_cyan_f;   break;
-         case 3: c.drawcolor = pc_orange_f; break;
-         case 4: c.drawcolor = pc_green_f;  break;
-         case 5: c.drawcolor = pc_pink_f;   break;
-         case 6: c.drawcolor = pc_red_f;    break;
-         case 7: c.drawcolor = pc_brown_f;  break;
-      }
-      if(n_region==i){              switch(n_region){
-         case 0: c.drawcolor = pc_blue;     break;
-         case 1: c.drawcolor = pc_yellow;   break;
-         case 2: c.drawcolor = pc_cyan;     break;
-         case 3: c.drawcolor = pc_orange;   break;
-         case 4: c.drawcolor = pc_green;    break;
-         case 5: c.drawcolor = pc_pink;     break;
-         case 6: c.drawcolor = pc_red;      break;
-         case 7: c.drawcolor = pc_brown;    break;  }
+      c.drawcolor = color_region(i,true);
+      if(n_region==i){ 
+        c.drawcolor = color_region(n_region,false);
          if(enab_region[n_region]==0) c.drawcolor = pc_gray;
       }
       j = i>n_region ? 2 : 0;
@@ -1196,7 +1261,6 @@ function postrender(canvas c){
    c.drawcolor = pc_yellow_f;
    c.setpos(upx+(5*fonw),upy); c.drawtext("n/a");
    done_region_num:
-
    // -------------------
    upx = x_hdr_place; upy = y_hdr_place;
    c.drawcolor = pc_brown;
@@ -1205,7 +1269,7 @@ function postrender(canvas c){
    if(mode_dpn_fall==0){ pc_tmp = pc_brown;  str_tmp = "floordist"; }
    if(mode_dpn_fall==1){ pc_tmp = pc_green;  str_tmp = "floating";  }
    if(mode_dpn_fall==2){ pc_tmp = pc_yellow; str_tmp = "inherit z"; }
-   c.setpos(upx+(14*fonw),upy); // len of "<F> autofall: "
+   c.setpos(upx+(14*fonw),upy);
    c.drawcolor = pc_tmp; c.drawtext(str_tmp);
    upy = draw_key_action(c, pc_brown, kw_f, "<F>", "autofall:", upx, upy);
    pc_tmp = mode_autospawn!=0 ? pc_brown : pc_brown_f;
@@ -1220,21 +1284,21 @@ function postrender(canvas c){
    c.drawcolor = pc_pink;
    c.setpos(upx,upy); c.drawtext("Mouse:");
      upx = x_col_mouse; upy += pad_fonh_half+fonh;
-   upy = draw_key_action(c, pc_pink, kw_lmb,  "<LB>", "open",  upx, upy);
-   upy = draw_key_action(c, pc_pink, kw_none, "<MW>", "spawn", upx, upy);
-   upy = draw_key_action(c, pc_pink, kw_rmb,  "<RB>", "kill",  upx, upy);
+   upy = draw_key_action(c, pc_pink, !bDisableLRmouseNotify ? kw_lmb : kw_none, "<LB>", "open",  upx, upy);
+   upy = draw_key_action(c, pc_pink,  bEnableMmouseNotify   ? kw_mmb : kw_none, "<MW>", "spawn", upx, upy);
+   upy = draw_key_action(c, pc_pink, !bDisableLRmouseNotify ? kw_rmb : kw_none, "<RB>", "kill",  upx, upy);
 // ---- warnings -------------------------------------------------------------
    upx = x_about; upy +=  pad_fonh_half;
-   if(mode_oper==4){  // requested to enter diag mode
+   if(mode_oper==MO_WantDiag){  // requested to enter diag mode
       pc_tmp = pc_red;
       if((int(level.timeseconds/0.5) % 2) == 0) pc_tmp = pc_cyan;
       upy = draw_key_action(c, pc_tmp,  kw_none, "Attention:", "this operation can't be undone.", upx, upy);
       upy += pad_glob;
-      upy = draw_key_action(c, pc_wh, kw_none, "", "Confirm "$mode_confirm$"/4 you want to overwrite Z-set.", upx, upy);
+      upy = draw_key_action(c, pc_wh, kw_none, "", "Confirm "$now_confirmed(mode_confirm)$"/4 you want to overwrite Z-set.", upx, upy);
       upy = draw_key_action(c, pc_wh_f, kw_none, "", "Press 1,2,3,4 keys or F1/F7 to cancel.", upx, upy);
       goto skip_by_validation;
    }
-   if((mode_all_layers!=0 || ena_lockz) && accumulated_pw_sens_fire<timetrigger_pw_sens_fire){
+   if((mode_rayprocess!=RP_SelFull || ena_lockz) && accumulated_pw_sens_fire<timetrigger_pw_sens_fire){
       nframe = (int(level.timeseconds/0.24) % 18);
       pc_tmp = (nframe==0) ? pc_yellow : pc_cyan;
       upy = draw_key_action(c, pc_tmp,  kw_none, "", "Fast rmode or lockz active. ",  upx, upy);
@@ -1252,16 +1316,43 @@ function postrender(canvas c){
       if(rc_tot < 4000){ pc_tmp = pc_wh_f; str_tmp = " possible";}     // up to 5000 feels good
       if(rc_tot > 8000) pc_tmp = pc_red;
       if(rc_tot>11000 && ((int(level.timeseconds/0.3) % 2) == 0)) pc_tmp = pc_cyan;
-   //   if(mode_all_layers==2)
       upy = draw_key_action(c, pc_tmp,  kw_none, "Note:", "heavy raytracing"$str_tmp$".", upx, upy);
       upy += pad_glob;
       upy = draw_key_action(c, pc_wh_f, kw_none, "", "Be ready to severe lagging.", upx, upy);
    }
+   skip_by_drawkeys_lifetimecfg:
+   if(mode_oper==MO_LifetimeCfg){
+      upx = x_col_map_ctl; upy = y_hdr_oper+pad_fonh_half+fonh;
+      c.drawcolor = pc_wh;
+      c.setpos(upx,upy); c.drawtext("<- press these keys or F6"); upy += fonh;
+      c.setpos(upx,upy); c.drawtext("   to leave this mode."); upy += fonh;
+      upy = draw_key_action(c, pc_green, kw_ijkl, "<IK>", "select var",  upx, upy);
+      upy = draw_key_action(c, pc_green, kw_ijkl, "<JL>", "change",  upx, upy);
+      
+      upx = x_col_oper; upy = y_hdr_region;
+      c.drawcolor = pc_orange; c.setpos(upx,upy); c.drawtext("FloorDist:");
+      upx = x_col_oper + (11*fonw);
+      c.drawcolor = pc_wh; c.setpos(upx,upy); c.drawtext("autofall control. Presets:");
+      upx = x_col_oper; upy += fonh; c.setpos(upx,upy); c.drawtext("61: classic unreal, best for 256 rooms");
+      upx = x_col_oper; upy += fonh; c.setpos(upx,upy); c.drawtext("24: narrow, for 128 rooms");
+      upx = x_col_oper; upy += fonh; c.setpos(upx,upy); c.drawtext("12: narrower, catches 16uu steps");
+      upx = x_col_oper; upy += (fonh*2);
+      c.drawcolor = pc_red; c.setpos(upx,upy); c.drawtext("Z-set discretization:");
+      upx = x_col_oper + (22*fonw);
+      c.drawcolor = pc_wh; c.setpos(upx,upy); c.drawtext("how thick each map");
+      upx = x_col_oper; upy += fonh; c.setpos(upx,upy); c.drawtext("layer is. Controls vertical sensitivity.");
+      upx = x_col_oper; upy += (fonh*2);
+      c.drawcolor = pc_green; c.setpos(upx,upy); c.drawtext("Prod SHR:");
+      upx = x_col_oper + (10*fonw);
+      c.drawcolor = pc_wh; c.setpos(upx,upy); c.drawtext("uniform spatial resolution for");
+      upx = x_col_oper; upy += fonh; c.setpos(upx,upy); c.drawtext("map. If you stick to 227j and limited by");
+      upx = x_col_oper; upy += fonh; c.setpos(upx,upy); c.drawtext("256px textures, 16uu/1px may be best.");
+   }
    skip_by_validation:
 // ---- right sidebar --------------------------------------------------------
    upx = x_rcol; upy = y_rcol_texdata;
-   upy = draw_key_action(c, pc_pink, kw_none, "", "TexData[]",   upx, upy);
-   upy = draw_key_action(c, pc_pink, kw_none, "", "AlignZ fill", upx, upy);
+   pc_tmp = mode_oper==MO_Mark ? pc_wh : pc_gray;
+   upy = draw_key_action(c, pc_tmp, kw_none, "", "AlignZ fill", upx, upy);
    // -------------------
    upx = x_rcol; upy = y_rcol_texdata_fill;
    // fill monitor code here
@@ -1269,17 +1360,47 @@ function postrender(canvas c){
    for(k=0;k<8;k++){
       for(i=0;i<8;i++){
          j = (k*8)+i;
-         if(j==63) continue; // access to [62] of array max
-//            c.drawcolor = pc_gray;
-         c.setpos(upx,upy); c.drawtile(texture'scipixel', fillw, fillh, 0,0,4,4);
+         if(j==63) continue;
+         c.setpos(upx,upy);
+         c.drawtile(texture'scipixel',  fillw, fillh, 0,0,4,4);
+         upx += (fillw+1);
+      }
+         upy += (fillh+1); upx = x_rcol;
+   }
+   upx = x_rcol; upy = y_rcol_texdata_fill;
+   for(k=0;k<8;k++){
+      for(i=0;i<8;i++){
+         j = (k*8)+i;
+         if(j==63) continue;
+         bool_tmp = false;
+         c.drawcolor = color_region(region_usedby[j],false);
+         if(region_usedby[j]!=9) bool_tmp = true;
+         if(bool_tmp){
+            c.setpos(upx+3,upy-2);
+            c.style = erenderstyle.sty_masked;
+            c.drawtext("*");
+         }
          upx += (fillw+1);
       }
          upy += (fillh+1); upx = x_rcol;
    }
    // -------------------
+   upx = x_rcol; upy = y_rcol_player-58;
+         draw_key_action(c, pc_tmp, kw_none, "", "Set:    @", upx, upy);
+   str_tmp = "";
+   if(n_layerz<10) str_tmp $= " ";
+    str_tmp $= string(n_layerz);
+   pc_tmp = mode_oper==MO_Mark ? pc_teal : pc_teal_f;
+   if(pc_tmp==pc_teal) pc_tmp = !ena_lockz ? pc_teal : pc_green;
+         draw_key_action(c, pc_tmp, kw_none, "", str_tmp, upx+(5*fonw), upy);
+   str_tmp = "X";
+   if(n_region>=0 && n_region<=7) str_tmp = string(n_region+1);
+   pc_tmp = color_region(n_region,mode_oper!=MO_Mark);
+   upy = draw_key_action(c, pc_tmp, kw_none, "", str_tmp, upx+(10*fonw), upy);
+   // -------------------
    upx = x_rcol; upy = y_rcol_player;
-   str_tmp = "Player";
-   if(mode_laser != 0) str_tmp = "Laser";
+   str_tmp = "   Player";
+   if(mode_laser != 0) str_tmp = "   Laser";
    upy = draw_key_action(c, pc_orange, kw_none, "", str_tmp, upx, upy);
    vect_tmp = mode_laser==0 ? p.location : laserdot.location;
    upy = draw_key_action(c, pc_wh, kw_none, "", "X: "$int(vect_tmp.x), upx, upy);
@@ -1287,16 +1408,16 @@ function postrender(canvas c){
    upy = draw_key_action(c, pc_wh, kw_none, "", "Z: "$int(vect_tmp.z), upx, upy);
    // -------------------
    upx = x_rcol; upy = y_rcol_scope;
-   upy = draw_key_action(c, pc_yellow, kw_none, "", "Process", upx, upy);
-   str_tmp = state_mapdisplay[mode_all_layers];
-   if(accumulated_pw_sens_fire > timetrigger_pw_sens_fire) str_tmp = state_mapdisplay[4];
+   upy = draw_key_action(c, pc_yellow, kw_none, "", "  Process", upx, upy);
+   str_tmp = now_rayprocessing(mode_rayprocess);
+   if(accumulated_pw_sens_fire > timetrigger_pw_sens_fire) str_tmp = now_rayprocessing(RP_ClientFull);
    upy = draw_key_action(c, pc_wh, kw_none, "", str_tmp, upx, upy);
    str_tmp = ena_lockz ? "lock" : n_layerz$"/"$presets_nmax;
-   pc_tmp = ena_lockz ? pc_green : pc_blue;
+   pc_tmp = ena_lockz ? pc_green : pc_teal; // was :pc_blue
    upy = draw_key_action(c, pc_tmp, kw_none, "Sel:", str_tmp, upx, upy);
    // -------------------
    upx = x_rcol; upy = y_rcol_align;
-   upy = draw_key_action(c, pc_blue, kw_none, "", "Align", upx, upy);
+   upy = draw_key_action(c, pc_blue, kw_none, "", "   Align", upx, upy);
    if(mode_mwheel==0){ pc_tmp = !ena_lockxy ? pc_green : pc_green_f; }else{ pc_tmp = !ena_lockxy ? pc_wh: pc_wh_f; }
    upy = draw_key_action(c, pc_tmp, kw_none, "", "X: "$int(global_offset_x), upx, upy);
    if(mode_mwheel==1){ pc_tmp = !ena_lockxy ? pc_green : pc_green_f; }else{ pc_tmp = !ena_lockxy ? pc_wh: pc_wh_f; }
@@ -1306,27 +1427,33 @@ function postrender(canvas c){
    upy = draw_key_action(c, pc_tmp, kw_none, "", "Z: "$str_tmp, upx, upy);
    // -------------------
    upx = x_rcol; upy = y_rcol_region;
-   upy = draw_key_action(c, pc_blue, kw_none, "", "Region", upx, upy);
-   upy = draw_key_action(c, pc_wh, kw_none, "", "S: "$size_step$"uu", upx, upy);
-   upy = draw_key_action(c, pc_wh, kw_none, "", "T: "$size_tex$"px", upx, upy);
+   upy = draw_key_action(c, pc_pink, kw_none, "", "   Region", upx, upy);
+   upy = draw_key_action(c, pc_wh,   kw_none, "", "S: "$size_step, upx, upy);
+   upy = draw_key_action(c, pc_wh,   kw_none, "", "T: "$size_tex, upx, upy);
    // -------------------
    upx = x_rcol; upy = y_rcol_lifetime;
-   upy = draw_key_action(c, pc_pink, kw_none, "", "Lifetime", upx, upy);
-   upy = draw_key_action(c, pc_pink, kw_none, "", "behavior", upx, upy);
-   upy += fonh;
-   upy = draw_key_action(c, pc_brown, kw_none, "", "FlrDist:", upx, upy);
-   upy = draw_key_action(c, pc_brown, kw_none, "", "ZDiscr:", upx, upy);
-   upy = draw_key_action(c, pc_brown, kw_none, "", "SHRf:", upx, upy);
+   nframe = (int(level.timeseconds/2.5) % 2);
+   pc_tmp = (nframe==0) ? pc_blue : pc_yellow;
+   if(mode_oper!=MO_LifetimeCfg) pc_tmp = pc_brown;
+   upy = draw_key_action(c, pc_tmp, kw_none, "", "Map lifetime", upx, upy);
+   upy = draw_key_action(c, pc_tmp, kw_none, "", "  behavior", upx, upy);
+   pc_tmp = mode_oper==MO_LifetimeCfg ? pc_orange : pc_gray;     draw_lifetime_sel(c,LTC_Floordist,upx,upy);
+   upy = draw_key_action(c, pc_tmp, kw_none, "", "FlrDist: "$int(autofall_floordist), upx, upy);
+   pc_tmp = mode_oper==MO_LifetimeCfg ? pc_red    : pc_gray;     draw_lifetime_sel(c,LTC_ZSetDiscr,upx,upy);
+   upy = draw_key_action(c, pc_tmp, kw_none, "", "ZDiscr: "$int(vert_discretization), upx, upy);
+   pc_tmp = mode_oper==MO_LifetimeCfg ? pc_green  : pc_gray;     draw_lifetime_sel(c,LTC_ProdSHR,upx,upy);
+   upy = draw_key_action(c, pc_tmp, kw_none, "", "PrSHR: "$(2**SHR_Factor_prodmap), upx, upy);
+   upy = draw_key_action(c, pc_brown, kw_f6, "<F6>", mode_oper==MO_LifetimeCfg ? "edit" : "done", upx, upy);
    // -------------------
    upx = x_rcol; upy = y_rcol_noob;
    upy = draw_key_action(c, pc_green, kw_none, "Noob? cmd", ">q", upx, upy); // right sidebar ends
 //----- player displayer -----------------------------------------------------
    if(mode_player>0){
        hl = p.location;
-       hlx = (hl.x>>shr_div_coords);
-       hly = (hl.y>>shr_div_coords);
-       hlx+=(size_tex>>1); hlx+=(global_offset_x>>shr_div_coords);
-       hly+=(size_tex>>1); hly+=(global_offset_y>>shr_div_coords);
+       hlx = (hl.x>>SHR_Factor_scanmap);
+       hly = (hl.y>>SHR_Factor_scanmap);
+       hlx+=(size_tex>>1); hlx+=(global_offset_x>>SHR_Factor_scanmap);
+       hly+=(size_tex>>1); hly+=(global_offset_y>>SHR_Factor_scanmap);
        if(ena_2xzoom){
           hlx *= 2; hlx -= (size_tex>>1);
           hly *= 2; hly -= (size_tex>>1);
@@ -1355,13 +1482,11 @@ function postrender(canvas c){
    i = int(1/last_tick_f);
    if(i > 60) i = 60;
    c.setpos(x_view_lpos+(15*fonw),y_statusbar); c.drawtext(i$"fps ");
-
 /* if(pn_tot>1000) c.drawcolor = pc_yellow;
    if(pn_tot>2000) c.drawcolor = pc_orange;
    if(pn_tot>3000) c.drawcolor = pc_red;
    if(pn_tot>4000) c.drawcolor = (int(level.timeseconds/0.3) % 2) == 0 ? pc_red : pc_wh; */
-
-   str_tmp = "";                             // todo diff str for pnmz or disable blinking
+   str_tmp = "";
 // if(pn_mz<1000) str_tmp $= "0";
 // if(pn_mz<100) str_tmp $= "0";
 // if(pn_mz<10) str_tmp $= "0";
@@ -1373,13 +1498,9 @@ function postrender(canvas c){
 // if(pn_tot<10) str_tmp $= "0";
    str_tmp $= string(pn_tot);
 //   str_tmp $= "pn";
-
    k = len(str_tmp) -1;
    k *= fonw;
    c.setpos(x_view_rpos-k, y_statusbar); c.drawtext(str_tmp);
-/*   k += (4*fonw);
-   c.drawcolor = pc_wh;
-   c.setpos(x_view_rpos-k, y_statusbar); c.drawtext("PN:"); */
 // ---- prod mode autoexec ---------------------------------------------------
    if(ena_prod && scrshot_timer <= 0.0){
       new_clientmsg[0] = "Making image "$string(n_layerz)$" of "$string(presets_nmax)$"...";
@@ -1405,7 +1526,6 @@ function postbeginplay(){
    inv_finfo = spawn(class'stinvfontinfo');
 // saveconfig();
    resetconfig();
-                   /* purecolor */                        /* faded to bg */
    pc_blue   = makecolor(175,175,255);   pc_blue_f   = makecolor(75 ,76 ,121);
    pc_bluer  = makecolor(148,148,255);   pc_bluer_f  = makecolor(66 ,67 ,121);
    pc_yellow = makecolor(255,255,170);   pc_yellow_f = makecolor(102,103,92 );
@@ -1420,33 +1540,28 @@ function postbeginplay(){
    pc_bg     = makecolor(24 ,25 ,53);    pc_fill_bg  = makecolor(38 ,39 ,70 );
    pc_gray   = makecolor(128,128,128);
    pc_wh     = makecolor(255,255,255);   pc_wh_f     = makecolor(161,161,173);
-
    foreach allactors(class'info',ifo){
       if(!ifo.isa('ONPLevelInfo')) ifo.SetPropertyText("MaxHealth","500");
       if(ifo.isa('ZoneInfo')) zoneinfo(ifo).bPainZone = false;
    }
-
    foreach allactors(class'inventory',w) if(w != self) w.destroy();
    foreach allactors(class'decoration',d) d.destroy();
    foreach allactors(class'effects',e) e.destroy();
-   state_mapdisplay[0]="SEL FULL";
-   state_mapdisplay[1]="ALL FAST";
-   state_mapdisplay[2]="ALL STD";
-   state_mapdisplay[3]="RELEVANT";
-   state_mapdisplay[4]="REL FULL";
    clientmsg_timer = -1.0;
    new_clientmsg[0] = "";
    new_clientmsg[1] = "";
    presets_nmax = 0;
-   for(i=0;i<64;i++) presets_z[i] = 0;
+   for(i=0;i<64;i++){
+      presets_z[i] = 0;
+      region_usefloor[i] = 0;
+      region_usedby[i] = 9;
+   }
    foreach allactors(class'pathnode',pn) if(!pn.isa('pathnoderuntime')) dpn_replace(pn.location);
    foreach allactors(class'trigger',t){
       t.group='';
       t.bTriggerOnceOnly = false;               // force enable
-//      if(t.TriggerType == TT_PlayerProximity){   // 2026-01-16: now always execute this
          t.TriggerType = TT_ClassProximity;     // prohibit autotrigger
-         t.ClassProximityType = class'scihud'; //ams_dummy_proxclass';
-//      }
+         t.ClassProximityType = class'scihud';
       t.RepeatTriggerTime = 0.0;                // normalize toggling stuff
       t.RetriggerDelay = 0.2;
       t.GotoState('NormalTrigger');
@@ -1459,19 +1574,21 @@ function postbeginplay(){
    lightbeam = spawn(class'STLight',,,vect(32767,32767,32767));
    laserdot = spawn(class'STLaser',,,vect(32767,32767,32767));
    do_diag_z();            // initial diag pass
-   mode_oper = 0;
+//   mode_oper = MO_Scan;
    new_clientmsg[0] = "";
    new_clientmsg[1] = "";
    clientmsg_timer = 0.0;
-   mode_player = 3;        // restore to convenient defaults
-   mode_all_layers = 3;
+   tog_opermode_uni(0);    // goto build mode
+/*
+   mode_player = 3;        
+   mode_rayprocess = RP_ClientLike;
 // mode_mwheel = 2; already 2
    ena_2xzoom = true;
    ena_4xzoom = false;
-   shr_div_coords = 2;
+   SHR_Factor_scanmap = 2;
    upd_resolution();
    ena_lockz = true;
-   ena_lockxy = true;
+   ena_lockxy = true; */
 }
 
 function playselect(){
@@ -1494,15 +1611,11 @@ function playselect(){
    p.consolecommand("set input f7 tog_opermode_uni 1");
    p.consolecommand("set input f4 tog_opermode_uni 2");
    p.consolecommand("set input f8 tog_opermode_uni 3");     // opermode ends
-/* p.consolecommand("set input f1 tog_opermode_scan");
-   p.consolecommand("set input f7 tog_opermode_diag");                         old code
-   p.consolecommand("set input f4 tog_opermode_mark");
-   p.consolecommand("set input f8 tog_opermode_prod");     // opermode ends  */
    p.consolecommand("set input z tog_digzoom");
    p.consolecommand("set input x tog_shr_factor");
    p.consolecommand("set input b tog_mode_step");
    p.consolecommand("set input g tog_mode_texsize");
-// p.consolecommand("set input enter tog_layerz_assign");  // mapctl ends
+   p.consolecommand("set input enter tog_layerz_assign");  // mapctl ends
    p.consolecommand("set input f5 tog_show_player");
    p.consolecommand("set input f2 tog_show_all_layers");
    p.consolecommand("set input r tog_mode_mwheel");
@@ -1536,13 +1649,12 @@ function playselect(){
    p.consolecommand("set input mousewheeldown ctl_mw_less");
    p.consolecommand("set input mousewheelup ctl_mw_more");  
    p.consolecommand("set input p shdn_waterable");
-   /* -------------------- old code --------------------------------
-   p.consolecommand("set input backslash tog_mark_region");      */
+   p.consolecommand("set input f6 tog_opermode_uni 4");
    upd_resolution(); upd_size_tex(); upd_size_step();
 }
 
 exec function tog_laser(){
-   mb_fail_confirm();
+   if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_q;
    sens_ignore = false;
    mode_laser++;
@@ -1562,7 +1674,7 @@ exec function tog_laser(){
 }
 
 exec function tog_ignore(){
-   mb_fail_confirm();
+   if(mb_fail_confirm()) return;
    if(sens_mov == none) return;
    key_when = 0.3; last_kw = kw_t;
    if(sens_mov.group=='sciignore'){
@@ -1573,8 +1685,8 @@ exec function tog_ignore(){
 }
 
 exec function tog_digzoom(){
-   mb_fail_confirm();
-   if(mode_oper==2) return;
+   if(mb_fail_confirm()) return;
+   if(mode_oper==MO_Mark) return;
    key_when = 0.3; last_kw = kw_z;
    if(!ena_2xzoom){
       ena_2xzoom = true;
@@ -1601,78 +1713,74 @@ exec function shdn_waterable(){
 }
 
 exec function tog_show_player(){
-   mb_fail_confirm();
+   if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_f5;
    mode_player++;
    if(mode_player > 3) mode_player = 0;
 }
 
 exec function tog_show_all_layers(){
-   mb_fail_confirm();
-   key_when = 0.3; last_kw = kw_f2;
-   mode_all_layers++;
-   if(mode_all_layers > 3) mode_all_layers = 0;
+   if(mb_fail_confirm()) return;
+   key_when = 0.3; last_kw = kw_f2;     switch(mode_rayprocess){
+   case RP_SelFull:    mode_rayprocess = RP_AllFast;    break;
+   case RP_AllFast:    mode_rayprocess = RP_AllFullEco; break;
+   case RP_AllFullEco: mode_rayprocess = RP_ClientLike; break;
+   case RP_ClientLike: mode_rayprocess = RP_SelFull;    break; }
 }
 
 exec function tog_lockxy(){
-   mb_fail_confirm();
+   if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_o;
    ena_lockxy = !ena_lockxy;
    if(ena_lockxy) new_clientmsg[0] = "Map center snapped to player.";
    else new_clientmsg[0] = "Map center released.";
    clientmsg_timer = 2.0;
 }
-exec function tog_mark_region(){
-   mb_fail_confirm();
-   // ??????
-   ena_tex_mark = !ena_tex_mark;
-}
-
 
 exec function tog_lockz(){
-   mb_fail_confirm();
+   if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_u;
    ena_lockz = !ena_lockz;
 }
 exec function tog_mode_mwheel(){
-   mb_fail_confirm();
+   if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_r;
    mode_mwheel++;
    if(mode_mwheel > 2) mode_mwheel = 0;
 }
 exec function tog_mode_step(){
-   mb_fail_confirm();
+   if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_b;
    mode_step++;
    if(mode_step>2) mode_step=0;
    upd_size_step();
 }
 exec function tog_mode_texsize(){
-   mb_fail_confirm();
+   if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_g;
    mode_texsize++;
    if(mode_texsize>2) mode_texsize=0;
    upd_size_tex();
 }
 exec function tog_shr_factor(){
-   mb_fail_confirm();
+   if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_x;
-   shr_div_coords--;
-   if(shr_div_coords<1) shr_div_coords = 5;
+   SHR_Factor_scanmap--;
+   if(SHR_Factor_scanmap<1) SHR_Factor_scanmap = 5;
    upd_resolution();
    upd_size_step();
 }
 
 exec function tog_dpn_fall(){
-   mb_fail_confirm();
+   if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_f;
    mode_dpn_fall++;
    if(mode_dpn_fall>2) mode_dpn_fall=0;
 }
 
 exec function tog_dpn_autospawn(){
-   mb_fail_confirm();
-   key_when = 0.3; last_kw = kw_v; // todo V/N keys +/- interval, add 96, maybe 256
+   if(mb_fail_confirm()) return;
+   key_when = 0.3; last_kw = kw_v; // todo add 96, maybe 256
    mode_autospawn++;
    if(mode_autospawn>2) mode_autospawn = 0;
    if(mode_autospawn==1) autospawn_interval = 192.0;
@@ -1771,57 +1879,48 @@ function do_diag_z(){
       presets_z[j+1] = pnz;             // insert in pos
    }
 // for(i=0; i<presets_nmax; i++) broadcastmessage(string(presets_z[i]));  // log result
-   mode_player = 0;          // reset interface to grab-ready // todo reset zooms
-   mode_all_layers = 0;
+
+/*   mode_player = 0;          // reset interface to grab-ready // todo reset zooms
+   mode_rayprocess = RP_SelFull;
    mode_mwheel = 2;
    mode_laser = 0;
    ena_2xzoom = false;
    ena_4xzoom = false;
-   shr_div_coords = 4;
+   SHR_Factor_scanmap = 4;
    upd_resolution();
    ena_lockz = false;
    ena_lockxy = false;
+   mode_oper = MO_Mark; */
    new_clientmsg[0] = "AreaZ set diag probe done, return to";
    new_clientmsg[1] = "mark mode. Prod defaults applied.";
    clientmsg_timer = 4.0;
-   mode_oper = 2;
+   tog_opermode_uni(2);
 }
 
 exec function ctl_mw_less(){
    if(mode_laser==1 && laser_wall_dist<384){
       if(laser_wall_dist<32) laser_wall_dist += 8;
        else laser_wall_dist += 32;
-//      new_clientmsg[0] = "Wall dist: "$int(laser_wall_dist);
-//      clientmsg_timer = 2.0;
-   }else if(mode_laser==2 /*&& laser_ray_length>0*/){
-      if(laser_ray_length>32) laser_ray_length -= 32;
-//       else laser_ray_length -= 8;
-       else laser_ray_length = 32;
-//      new_clientmsg[0] = "Wall dist: "$int(laser_ray_length);
-//      clientmsg_timer = 2.0;
-   }else{ if(mode_laser!=0) return;              switch(mode_mwheel){
+   }else if(mode_laser==2){
+      if(laser_ray_length>64) laser_ray_length -= 32;
+       else laser_ray_length = 64;
+   }else{ if(mode_laser!=0) return;             switch(mode_mwheel){
       case 0: if(!ena_lockxy) global_offset_x -= size_step; break;
       case 1: if(!ena_lockxy) global_offset_y -= size_step; break;
-      case 2: if(n_layerz>0) n_layerz--;                    break;  }
+      case 2: if(n_layerz>0) n_layerz--;                    break; }
    }
 }
 exec function ctl_mw_more(){
    if(mode_laser==1 && laser_wall_dist>0){
       if(laser_wall_dist>32) laser_wall_dist -= 32;
        else laser_wall_dist -= 8;
-//      new_clientmsg[0] = "Wall dist: "$int(laser_wall_dist);
-//      clientmsg_timer = 2.0;
-   }else if(mode_laser==2 /* && laser_ray_length<384*/){
-//    if(laser_ray_length<32) laser_ray_length += 8;
-      if(laser_ray_length<384) laser_ray_length += 32;
-//     else laser_ray_length += 32;
-       else laser_ray_length = 384;
-//      new_clientmsg[0] = "Wall dist: "$int(laser_ray_length);
-//      clientmsg_timer = 2.0;
-   }else{ if(mode_laser!=0) return;              switch(mode_mwheel){
+   }else if(mode_laser==2){
+      if(laser_ray_length<768) laser_ray_length += 32;
+       else laser_ray_length = 768;
+   }else{ if(mode_laser!=0) return;             switch(mode_mwheel){
       case 0: if(!ena_lockxy) global_offset_x += size_step; break;
       case 1: if(!ena_lockxy) global_offset_y += size_step; break;
-      case 2: if(n_layerz<presets_nmax) n_layerz++;         break;  }
+      case 2: if(n_layerz<presets_nmax) n_layerz++;         break; }
    }
 }
 
@@ -1836,13 +1935,38 @@ exec function dec_nlayer(){
    n_layerz--;
 }
 
-exec function do_scr_w(){ if(do_scr_common()) return; global_offset_y -= size_step; }
-exec function do_scr_a(){ if(do_scr_common()) return; global_offset_x -= size_step; }
-exec function do_scr_s(){ if(do_scr_common()) return; global_offset_y += size_step; }
-exec function do_scr_d(){ if(do_scr_common()) return; global_offset_x += size_step; }
-function bool do_scr_common(){
-   mb_fail_confirm();  if(ena_lockxy) return true;
+exec function do_scr_w(){ if(do_scr_common(0)) return; global_offset_y -= size_step; }
+exec function do_scr_a(){ if(do_scr_common(1)) return; global_offset_x -= size_step; }
+exec function do_scr_s(){ if(do_scr_common(2)) return; global_offset_y += size_step; }
+exec function do_scr_d(){ if(do_scr_common(3)) return; global_offset_x += size_step; }
+function bool do_scr_common(byte ijkl_key){ // used in MO_LifetimeCfg mode only
+   if(mode_oper==MO_LifetimeCfg) goto skip_to_lifetimecfg_controls;
+   if(mb_fail_confirm()) return ena_lockxy;
+   if(ena_lockxy) return true;
    key_when = 0.3; last_kw = kw_ijkl; return false;
+   skip_to_lifetimecfg_controls: switch(ijkl_key){
+      case 0: switch(mode_ltcfg){  // up key, inc mode
+         case LTC_ZSetDiscr: mode_ltcfg=LTC_Floordist; break;
+         case LTC_ProdSHR:   mode_ltcfg=LTC_ZSetDiscr; break; }
+      break;
+      case 2: switch(mode_ltcfg){  // dn key, dec mode
+         case LTC_Floordist: mode_ltcfg=LTC_ZSetDiscr; break;
+         case LTC_ZSetDiscr: mode_ltcfg=LTC_ProdSHR;   break; }
+      break;
+   } switch(mode_ltcfg){           // alter keys, exec anyway                 
+    case LTC_Floordist:
+       if(ijkl_key==3){ if(autofall_floordist<24) autofall_floordist=24; // inc
+                   else if(autofall_floordist<61) autofall_floordist=61; }
+       if(ijkl_key==1){ if(autofall_floordist>24) autofall_floordist=24; // dec
+                   else if(autofall_floordist>12) autofall_floordist=12; }                          break;
+    case LTC_ZSetDiscr:
+       if(ijkl_key==3){ vert_discretization+=16; if(vert_discretization>256) vert_discretization=256; }
+       if(ijkl_key==1){ vert_discretization-=16; if(vert_discretization<80)  vert_discretization=80;  }  break;
+    case LTC_ProdSHR:  
+       if(ijkl_key==3){ SHR_Factor_prodmap++; if(SHR_Factor_prodmap>7) SHR_Factor_prodmap=7; }
+       if(ijkl_key==1){ SHR_Factor_prodmap--; if(SHR_Factor_prodmap<1) SHR_Factor_prodmap=1; }           break;
+   }
+   return true;
  }
 
 function altfire(float f){
@@ -1868,13 +1992,10 @@ function altfire(float f){
 
 function fire(float f){
    local pawn p;
-//   local actor atarg;
-//   local vector hl, hn, x, y, z;
    local mover m;
    p = pawn(owner);
    if(p == none) return;
    key_when = 0.3; last_kw = kw_lmb;
-//   getaxes(p.viewrotation,x,y,z);
    if(sens_mov!=none){                     // open by mover
       if(!bUseUntrigger) goto skip_fire_nountrigger_mov;
       if(sens_mov.group=='mactive'){
@@ -1914,11 +2035,13 @@ exec function sci_user_dpn_spawn(){  // middlemouse
 defaultproperties{
   laserdot=None
   mode_laser=0
-  shr_div_coords=2
+  SHR_Factor_scanmap=SHR_Factor_default
+  SHR_Factor_prodmap=4
   PickupViewMesh=LodMesh'UnrealShare.AutoMagPickup'
   global_offset_x=0
   global_offset_y=0
-  vert_discretization=80.0
+  vert_discretization=128.0
+  autofall_floordist=61.0
   bDisableAllBtnsNotify=false
   bDisableLRmouseNotify=false
   bEnableMmouseNotify=false
@@ -1931,16 +2054,16 @@ defaultproperties{
   ena_4xzoom=false
   scrshot_timer=0.0
   n_region=9
-  last_mark_timestamp=0.0
-  last_mark_resolution=1
-  last_mark_texture=1
+//  last_mark_timestamp=0.0
+//  last_mark_resolution=1
+//  last_mark_texture=1
   mode_autospawn=0
   autospawn_interval=192.0
   laser_wall_dist=0.0
-  laser_ray_length=32.0
-  mode_all_layers=3
-  mode_oper=0
-  mode_confirm=0
+  laser_ray_length=64.0
+  mode_rayprocess=RP_ClientLike
+  mode_oper=MO_Scan
+  mode_confirm=MC_Reset
   mode_player=3
   mode_mwheel=2
   mode_step=2
@@ -1953,7 +2076,7 @@ defaultproperties{
   PickupAmmoCount=9999
   ena_prod=false
   PickupMessage=AreaMap CT scan tool. Enter Q in console for more info.
-
+  alignz_seek=0
   region_align(0)=(X=275.0,Y=0.0)
   region_align(1)=(X=-275.0,Y=0.0)
   region_align(2)=(X=0.0,Y=275.0)
@@ -1962,7 +2085,6 @@ defaultproperties{
   region_align(5)=(X=0.0,Y=-275.0)
   region_align(6)=(X=275.0,Y=-275.0)
   region_align(7)=(X=-275.0,Y=-275.0)
-
   enab_region(0)=0
   enab_region(1)=0
   enab_region(2)=0
@@ -1973,7 +2095,6 @@ defaultproperties{
   enab_region(7)=0
   enab_region(8)=0
   enab_region(9)=0
-//var float region_when[8];   // timestamp of creation
   region_scale(0)=16.0;
   region_scale(1)=16.0;
   region_scale(2)=16.0;
@@ -1990,7 +2111,6 @@ defaultproperties{
   region_sizetex(5)=128;
   region_sizetex(6)=128;
   region_sizetex(7)=128;
-
 }
 
 /*

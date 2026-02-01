@@ -16,6 +16,8 @@ function beginplay(){
 }
 
 defaultproperties{
+  Physics=PHYS_MovingBrush
+  PhysRate=9999.0
   DrawType=DT_None
   LightBrightness=240
   LightHue=173
