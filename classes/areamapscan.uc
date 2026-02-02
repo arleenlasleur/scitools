@@ -1,9 +1,11 @@
 class AreaMapScan extends weapon config(scitools);
-// todo laser2 mwheel not working (wrong coords of spawn/destroy)
-// todo test autospawn wont spam in water/fly
+// todox laser2 mwheel not working (wrong coords of spawn/destroy)
+// todox test autospawn wont spam in water/fly
 // todo make strictwall
 // todo manual diag mode, <use this floor> key/cmd - almost done thru blinking dpns
-// todo grayed pxzoom in mark mode, disable by keyfunc done
+// todox grayed pxzoom in mark mode, disable by keyfunc done
+// todo check all keys avail vs opermode.
+// todo autospawned dpns are bhidden, set it false after short time
 
 #exec texture import file="textures\scipixel.png"    name="scipixel"    package="scitools" mips=1 flags=0 btc=-2
 #exec texture import file="textures\scipixelblk.png" name="scipixelblk" package="scitools" mips=1 flags=0 btc=-2
@@ -27,8 +29,7 @@ var byte presets_nmax;               // selectable total (inclusive, lay0...lay1
 var float global_offset_x,global_offset_y; // map center vs world position for texture
 var float scrshot_timer;             // wait after sshot to flush disk
 // new code ----------------
-var byte enab_region[8];            // because we use 9 as noregion index;
-//var byte enab_region[10];            // because we use 9 as noregion index;
+var byte enab_region[8];             // because we use 9 as noregion index;
                                      // here and further, enab_ = ena_byte type because bool[] prohibited
 var vector2d region_align[8];
 var string region_texture[8];
@@ -39,7 +40,6 @@ var byte region_usedby[64];          // num of n_region preset which occupy abov
 var byte alignz_seek;                // mem write pointer
 // -------------------------
 var byte n_region;
-
 var enum EOper{ MO_Scan, MO_Diag, MO_Mark, MO_Prod, MO_WantDiag, MO_LifetimeCfg} mode_oper;
 var enum ELTCfg{ LTC_Floordist, LTC_ZSetDiscr, LTC_ProdSHR} mode_ltcfg;
 var enum EConf{ MC_Reset, MC_Doit, MC_Yesimsure, MC_Stopfuckingasking, MC_Confirmed} mode_confirm;
@@ -48,7 +48,7 @@ var enum ERayPrc { RP_SelFull, RP_AllFast, RP_AllFullEco, RP_ClientLike, RP_Clie
 var byte mode_mwheel;                // 0=x,       1=y,        2=layer
 var bool ena_lockz;                  // true=snap selz to playerz
 var bool ena_lockxy;             // true=snap map center to player (lock xy)
-var byte mode_dpn_fall;              // 0=falling, 1=floating, 2=inheritz
+var byte mode_dpn_fall;              // 0=falling, 1=floating, 2=inherit user z, 3=inherit laser z
 var bool ena_2xzoom;                 // half tex resolution (digital zoom)
 var bool ena_4xzoom;                 // quarter
 var bool pw_sens_fire;               // true if user holds weaponfire
@@ -74,7 +74,8 @@ var byte SHR_Factor_prodmap;
 const    SHR_Factor_default=2;
 const    SHR_Factor_max=5;           // up to 7 supported
 var STLight lightbeam;               // light blast
-var STLaser laserdot;                // laser blast
+var STLaser laserdpn;                // lased DPN location
+var STLaserBlast laserdot;                // laser blast
 var byte mode_laser;                 // 0=off, 1=inf, 2=finite
 var trigger sens_trig;               // sensed trigger for controlling
 var mover sens_mov;                  // sensed mover for controlling
@@ -95,9 +96,9 @@ const advance_ray_pos_std = 1024;     // normal mode
 const advance_ray_pos_fast = 8192;    // economode
 const timetrigger_pw_sens_fire=0.45;  // how long hold fire to preview full render mode
 const max_fastscan_vsizesq = 2400000; // ignore dist>1536 pathnodes when in modes 1,3
-const dpn_addz_narrow = 24;   // height of scanned wall perimeter, 50 cm
+/*const dpn_addz_narrow = 24;   // height of scanned wall perimeter, 50 cm
 const dpn_addz_narrower = 12; // cause too many lines on laddersteps but maybe people prefer this
-const dpn_addz_classic = 61;  // 130 cm, vanilla unreal pathnode placement
+const dpn_addz_classic = 61;  // 130 cm, vanilla unreal pathnode placement */
 const player_vs_dpn_addz = 16; // 80/2 = 40; 40-24 = 16, compensate playerz
 const sens_trig_radius = 384;  // how far to sense triggers
 const max_size_tex = 1024;
@@ -291,8 +292,7 @@ function color color_region(byte num, bool bfade){  switch(num){
    case 4: return !bfade ? pc_green  : pc_green_f;  break;
    case 5: return !bfade ? pc_pink   : pc_pink_f;   break;
    case 6: return !bfade ? pc_red    : pc_red_f;    break;
-   case 7: return !bfade ? pc_brown  : pc_brown_f;  break;
-   case 9: return !bfade ? pc_brown  : pc_brown_f;  break; } return pc_gray;
+   case 7: return !bfade ? pc_brown  : pc_brown_f;  break; } return pc_gray;
 }
 function string now_confirmed(EConf conf_stage){  switch(conf_stage){
    case MC_Reset:             return "0"; break;
@@ -636,7 +636,7 @@ exec function q(){
 }
 
 function tick(float f){
-   local vector hl,hn, x,y,z;
+   local vector hl,hn, x,y,z, spawn_where;
    local rotator r;
 // local float lasermult, laserdist;
 // local vector laserorigin;
@@ -664,31 +664,42 @@ function tick(float f){
    if(!pw_sens_fire) accumulated_pw_sens_fire = 0;
 
    getaxes(p.viewrotation,x,y,z);
-   if(mode_laser != 0){
+   spawn_where = p.location + 56*x;  // exec anyway, summonlike pos if laser off
+   z.z = p.location.z; // store laser_z from user_z for case when laser off, to prevent usage of undefined
+   if(mode_laser!=0){
       sens_mov = mover(trace(hl,hn,p.location + 4000*x,p.location,true));
+      hl -= x*2;
+      if(laserdot!=none) laserdot.setlocation(hl);
+//    laserdist = vsize(p.location - hl);
       sens_ignore = sens_mov.group == 'sciignore';
       sens_trig = none;
+
       if(mode_laser == 1){
-         z.z = hl.z;
-      /* if(rotator(hn).pitch <= anti_artifacts_maxslope) */ hl += hn*laser_wall_dist; // 2026-01-16: offset laser off all surfs, not walls only
-         hl.z = z.z;
-      }else if(mode_laser == 2){
+         z.z = hl.z;      // save laserblast pos z
+         hl += hn*laser_wall_dist; // offset laser
+      }
+      if(mode_laser == 2){
          hl = p.location;
          hl += vector(p.viewrotation)*laser_ray_length;
       }
-      laserdot.setlocation(hl); // todo overwrite falling z coord altering into hl.z
+      spawn_where = hl;              // some laser trace done, laser-dictated pos
    }else{
       sens_trig = FindTrigger(p.location);
       sens_mov = none;
    }
-
-/* laserorigin = p.location;
-   getaxes(p.viewrotation,x,y,z);
-   laserorigin += z*2;
-   laserorigin += y*4;
-   Trace(HitLoc,HitNor,EndTrace,laserorigin + 15000*x,True);
-   hitloc -= x*7;
-   laserdist = vsize(p.location - hitloc); */
+   y = spawn_where;  // cancer code, but we don't
+   y.z -= 512;       // use y later, so safe to do it; 512 is max dpn_fall dist
+   trace(hl, hn, y, spawn_where, true); // trace to floor from pos got above
+   if(mode_dpn_fall!=1) spawn_where    = hl;  // use floortraced pos if non-floating mode
+   if(mode_dpn_fall==0) spawn_where.z += autofall_floordist; // falling mode, RAISE laser pos from floor bc we traced DOWN to floor
+   // mode_dpn_fall==1, do nothing
+   if(mode_dpn_fall==2) spawn_where.z  = p.location.z;       // inherit user z
+   if(mode_dpn_fall==3) spawn_where.z  = z.z;                // inherit laserblast z
+// ----------------------
+   if(laserdpn!=none){
+      laserdpn.setlocation(spawn_where);
+      laserdpn.bHidden = mode_laser==0;
+   }
 
    autofly_set_timer -= f;
    autofly_clr_timer -= f;
@@ -713,7 +724,7 @@ function tick(float f){
       new_clientmsg[1] = "";
    }
    if(mode_autospawn!=0 && autospawn_timer<=0 && mode_laser==0){   // dpn placement process
-      if(p.physics == PHYS_Walking) sci_scripted_dpn_spawn(p.location);
+      if(p.physics==PHYS_Walking && laserdpn!=none) sci_scripted_dpn_spawn(laserdpn.location); // was p.location
       autospawn_timer = 0.2;
    }
    if(last_tick_f_upd_timer<=0){     // frametime monitor process
@@ -774,16 +785,9 @@ exec function tog_light(){
    else lightbeam.LightType = LT_None;
 }
 
-function sci_scripted_dpn_spawn(vector l){
-   if(FindDPN(l, autospawn_interval) != none) return;
-// if(FindRPN(l, autospawn_interval) != none) return;
-   dpn_spawn(false);
-}
+function sci_scripted_dpn_spawn(vector l){ if(FindDPN(l, autospawn_interval)==none) dpn_spawn(); }
 
-// todo: laser mesh, selectable pnz trunc
-// todo: welcome dialog
-
-function int draw_key_help(canvas c, color dc, string hk, string desc, int from_x, int from_y){
+/*function int draw_key_help(canvas c, color dc, string hk, string desc, int from_x, int from_y){
    local int desc_x,lx,ly;
    desc_x = (len(hk)+1)*fonw; // offset 1 xpos to descr
    lx = from_x; ly = from_y;
@@ -793,7 +797,7 @@ function int draw_key_help(canvas c, color dc, string hk, string desc, int from_
    c.drawcolor = dc;
    c.setpos(lx,ly);  c.drawtext(desc);
    return ly+fonh;            // move 1 ypos down
-}
+}  */
 
 function int draw_key_action(canvas c, color dc, ekeywhere evs, string hk, string desc, int from_x, int from_y){
    local int desc_x,lx,ly;
@@ -809,8 +813,9 @@ function int draw_key_action(canvas c, color dc, ekeywhere evs, string hk, strin
       c.drawcolor = pc_wh;                                  // dim white keybar shithacks:
       if( evs==kw_t && sens_mov==none)                             c.drawcolor = pc_gray; // no mover to ignore
       if( evs==kw_ijkl && ena_lockxy && mode_oper!=MO_LifetimeCfg) c.drawcolor = pc_gray; // no ijkl, snapped to player
-      if((evs==kw_m || evs==kw_ent)  && mode_oper!=MO_Mark)        c.drawcolor = pc_gray; // not in markup mode for mark/assign
+      if((evs==kw_m || evs==kw_ent) && mode_oper!=MO_Mark)         c.drawcolor = pc_gray; // not in markup mode for mark/assign
       if( evs==kw_p && dc!=pc_orange)                              c.drawcolor = pc_gray; // zone is not water
+      if( evs==kw_z && mode_oper==MO_Mark)                         c.drawcolor = pc_gray; // no pxz in markup mode
    }
    c.setpos(lx,ly);  c.drawtext(hk);
    if(desc=="") return ly;    // abort if empty
@@ -841,9 +846,7 @@ function postrender(canvas c){
    local rotator r;
    local float rotr;  // radians rotation
    local byte nmarker;
-// local pathnode pn;
    local pathnoderuntime pn;
-//   local pathnode pns; // static
    local int hlx,hly,mkx,mky;
    local int marked_error;
    local playerpawn p;
@@ -854,7 +857,7 @@ function postrender(canvas c){
    local float pnz;
    local bool nomatch_z; // this z does not match current sel_z or lock_z
    p = playerpawn(owner);
-   if(p==none || inv_finfo==none || lightbeam==none || laserdot==none) return;
+   if(p==none || inv_finfo==none || lightbeam==none || laserdpn==none || laserdot==none) return;
    if(ena_lockxy){              // read it here because faster than tick()
       global_offset_x = (-1) * p.location.x;
       global_offset_y = (-1) * p.location.y;
@@ -936,7 +939,7 @@ function postrender(canvas c){
              else if (SHR_Factor_scanmap==3) c.drawcolor = makecolor(112,112,160);
              else                        c.drawcolor = makecolor(80,80,128);
          }
-         if(pn==laserdot) c.drawcolor = pc_pinker;
+         if(pn==laserdpn) c.drawcolor = pc_pinker;
 //       if(abs(rotator(hn).pitch) <= anti_artifacts_maxslope){ // old code // todo strictwalls here
          if(    rotator(hn).pitch  <= anti_artifacts_maxslope){ // allow negative slope as well
                   // todo
@@ -945,28 +948,32 @@ function postrender(canvas c){
             if(ena_2xzoom) pnz = 0.5;
             if(ena_4xzoom) pnz = 1.0;
             if(rtarg.group!='sciignore'){
+               if(pn==laserdpn && (mode_oper==MO_Mark || mode_oper==MO_Prod)) goto skip_by_drawmap_prod;
                c.setpos(hlx,hly);  c.drawicon(texture'scipixel',pnz);
+               skip_by_drawmap_prod:
             }
          }
          skip_by_drawmap_outtexbounds:
          if(mode_rayprocess!=RP_SelFull) pnz = advance_ray_pos_std;   // assign rays density, full quality for mode 0 only
           else pnz = advance_ray_pos_full;
          if(mode_rayprocess==RP_AllFast) pnz = advance_ray_pos_fast;  // skip rays in mode 1, to 8x faster
-         if(nomatch_z) pnz = advance_ray_pos_fast;           // skip mismathing by z
-         if(mode_rayprocess==RP_ClientLike                               // skip in mode 3
+         if(nomatch_z) pnz = advance_ray_pos_fast;                    // skip mismathing by z
+         if(mode_rayprocess==RP_ClientLike                            // skip in mode 3
             && vsizesq(pn.location - p.location)>max_fastscan_vsizesq) // outside max radius
                 pnz = advance_ray_pos_fast;
+         if(pn==laserdpn) pnz = advance_ray_pos_std;    // cancel skips for laser
          if(accumulated_pw_sens_fire>timetrigger_pw_sens_fire && !nomatch_z) pnz = advance_ray_pos_full; // override to full quality
-         r.yaw += pnz;                                       // apply
-         rc_tot ++;
+         r.yaw += pnz;  // apply
+         rc_tot ++;     // rays counter
       }
    }
 //----- laser blast position -------------------------------------------------
    if(mode_laser != 0){
+      // ------------------------------------------------
       c.drawcolor = makecolor(112,112,160);
       hl = p.location;
       getaxes(p.viewrotation,x,y,z);
-      k = int( vsize(p.location - laserdot.location) / 40);
+      k = int( vsize(p.location - laserdpn.location) / 40);
       if(k > 256) k = 256;
       for(i=0; i<k; i++){
          hl += 40*x;
@@ -992,6 +999,30 @@ function postrender(canvas c){
          if(ena_2xzoom) pnz = 1.0;
          c.setpos(hlx,hly); c.drawicon(texture'scipixel',pnz);
       }
+      // ------------------------------------------------
+      c.drawcolor = makecolor(255,255,120);
+      hl = laserdot.location;
+         hlx = (hl.x>>SHR_Factor_scanmap);
+         hly = (hl.y>>SHR_Factor_scanmap);
+         hlx += (size_tex>>1); hlx += (global_offset_x >> SHR_Factor_scanmap);
+         hly += (size_tex>>1); hly += (global_offset_y >> SHR_Factor_scanmap);
+         if(ena_2xzoom){
+            hlx *= 2; hlx -= (size_tex>>1);
+            hly *= 2; hly -= (size_tex>>1);
+         }
+         if(ena_4xzoom){
+            hlx *= 2; hlx -= (size_tex>>1);
+            hly *= 2; hly -= (size_tex>>1);
+         }
+         hlx+=hud_maptex_offset_x;
+         hly+=hud_maptex_offset_y;
+         // -----------------------------------------
+         pnz = 1.0;
+//         if(ena_2xzoom) pnz = 1.0;
+         c.setpos(hlx,hly);
+         if(!( hlx<hud_maptex_offset_x          || hly<hud_maptex_offset_y          ||
+             hlx>hud_maptex_offset_x+size_tex || hly>hud_maptex_offset_y+size_tex  ))
+                c.drawicon(texture'scipixel',pnz);
    }
 //----- region borders, above main texture, under menu text ------------------
    if(mode_oper!=MO_Mark) goto skip_by_drawregion_nomarkup;
@@ -1078,7 +1109,8 @@ function postrender(canvas c){
    c.drawcolor = pc_blue;
    c.setpos(upx,upy); c.drawtext("Map ctl:");
      upx = x_col_map_ctl; upy += (pad_fonh_half+fonh);
-   upy = draw_key_action(c, pc_blue, kw_z, "<Z>", "pxzoom",  upx, upy);
+   pc_tmp = mode_oper!=MO_Mark ? pc_blue : pc_blue_f;
+   upy = draw_key_action(c, pc_tmp,  kw_z, "<Z>", "pxzoom",  upx, upy);
    upy = draw_key_action(c, pc_blue, kw_x, "<X>", "uuzoom", upx, upy);
    upy = draw_key_action(c, pc_blue, kw_b, "<B>", "step",   upx, upy);
    upy = draw_key_action(c, pc_blue, kw_g, "<G>", "texture",upx, upy); upx -= (fonw*2);
@@ -1125,7 +1157,7 @@ function postrender(canvas c){
    upx = x_hdr_region;
    pc_tmp = pc_orange;                                      // shithack: adjust pc_tmp to trigger pc_wh replacement
    if(region.zone!=none){ if(!region.zone.bwaterzone) pc_tmp = pc_orange_f; }  // and dont access zone handle again
-   upy = draw_key_action(c, pc_tmp, kw_p, "<P>", "!water",  upx, upy);
+         draw_key_action(c, pc_tmp, kw_p, "<P>", "!water",  upx, upy-fonh);
    // -------------------
    upx = x_hdr_region; upy = y_hdr_region;
    c.drawcolor = pc_green;
@@ -1164,10 +1196,11 @@ function postrender(canvas c){
      upx = x_col_place; upy += pad_fonh_half+fonh;
    if(mode_dpn_fall==0){ pc_tmp = pc_brown;  str_tmp = "floordist"; }
    if(mode_dpn_fall==1){ pc_tmp = pc_green;  str_tmp = "floating";  }
-   if(mode_dpn_fall==2){ pc_tmp = pc_yellow; str_tmp = "inherit z"; }
-   c.setpos(upx+(14*fonw),upy);
+   if(mode_dpn_fall==2){ pc_tmp = pc_yellow; str_tmp = "inherit user z"; }
+   if(mode_dpn_fall==3){ pc_tmp = pc_yellow; str_tmp = "inherit laser z"; }
+   c.setpos(upx+(10*fonw),upy);
    c.drawcolor = pc_tmp; c.drawtext(str_tmp);
-   upy = draw_key_action(c, pc_brown, kw_f, "<F>", "autofall:", upx, upy);
+   upy = draw_key_action(c, pc_brown, kw_f, "<F>", "fall:", upx, upy);
    pc_tmp = mode_autospawn!=0 ? pc_brown : pc_brown_f;
    str_tmp = " off";
    if(mode_autospawn==1) str_tmp = ": each 192";
@@ -1360,18 +1393,12 @@ function postrender(canvas c){
        }
        hlx += hud_maptex_offset_x;
        hly += hud_maptex_offset_y;
-//       c.drawcolor = (int(level.timeseconds/1.2) % 2) == 0 ? makecolor(87,87,128) : makecolor(225,225,255);
-//       if(mode_player==2) c.drawcolor = makecolor(225,225,0);
-//       if(mode_player<3){  // mode 1, 2
-//          c.setpos(hlx,hly); c.drawicon(texture'scipixel',mode_player);
-//       }else{              // mode 3
-          rotr = (p.viewrotation.yaw+16384) % 65536;  // -90 because zero yaw in unrealed is A of WASD
-          if(rotr < 0) rotr += 65536;
-          nmarker = byte(rotr/2730.66);
-          c.setpos(hlx-8,hly-8);
-          c.drawcolor = (int(level.timeseconds/0.7) % 2) == 0 ? makecolor(192,192,255) : makecolor(225,225,255);
-          c.DrawTile(texture'scibearing',16,16, nmarker*16,0,16,16);
-//       }
+       rotr = (p.viewrotation.yaw+16384) % 65536;  // -90 because zero yaw in unrealed is A of WASD
+       if(rotr < 0) rotr += 65536;
+       nmarker = byte(rotr/2730.66);
+       c.setpos(hlx-8,hly-8);
+       c.drawcolor = (int(level.timeseconds/0.7) % 2) == 0 ? makecolor(192,192,255) : makecolor(225,225,255);
+       c.DrawTile(texture'scibearing',16,16, nmarker*16,0,16,16);
    }
 // ---- nav camera counters --------------------------------------------------
    c.drawcolor = pc_wh;
@@ -1461,7 +1488,8 @@ function postbeginplay(){
       m.StayOpenTime = 0.0;
    }
    lightbeam = spawn(class'STLight',,,vect(32767,32767,32767));
-   laserdot = spawn(class'STLaser',,,vect(32767,32767,32767));
+   laserdpn = spawn(class'STLaser',,,vect(32767,32767,32767));
+   laserdot = spawn(class'STLaserBlast',,,vect(32767,32767,32767));
 //   mode_oper = MO_Scan;
    new_clientmsg[0] = "";
    new_clientmsg[1] = "";
@@ -1511,14 +1539,14 @@ function playselect(){
    p.consolecommand("set input pageup inc_nlayer");
    p.consolecommand("set input pagedown dec_nlayer");
 // --------- regions ---------------------------------------------------
-   p.consolecommand("set input 1 tog_region_uni 0"); p.consolecommand("set input numpad1 tog_region_uni 0");  // was tog_region_1
-   p.consolecommand("set input 2 tog_region_uni 1"); p.consolecommand("set input numpad2 tog_region_uni 1");  // was tog_region_2
-   p.consolecommand("set input 3 tog_region_uni 2"); p.consolecommand("set input numpad3 tog_region_uni 2");  // was tog_region_3
-   p.consolecommand("set input 4 tog_region_uni 3"); p.consolecommand("set input numpad4 tog_region_uni 3");  // was tog_region_4
-   p.consolecommand("set input 5 tog_region_uni 4"); p.consolecommand("set input numpad5 tog_region_uni 4");  // was tog_region_5
-   p.consolecommand("set input 6 tog_region_uni 5"); p.consolecommand("set input numpad6 tog_region_uni 5");  // was tog_region_6
-   p.consolecommand("set input 7 tog_region_uni 6"); p.consolecommand("set input numpad7 tog_region_uni 6");  // was tog_region_7
-   p.consolecommand("set input 8 tog_region_uni 7"); p.consolecommand("set input numpad8 tog_region_uni 7");  // was tog_region_8
+   p.consolecommand("set input 1 tog_region_uni 0"); p.consolecommand("set input numpad1 tog_region_uni 0");
+   p.consolecommand("set input 2 tog_region_uni 1"); p.consolecommand("set input numpad2 tog_region_uni 1");
+   p.consolecommand("set input 3 tog_region_uni 2"); p.consolecommand("set input numpad3 tog_region_uni 2");
+   p.consolecommand("set input 4 tog_region_uni 3"); p.consolecommand("set input numpad4 tog_region_uni 3");
+   p.consolecommand("set input 5 tog_region_uni 4"); p.consolecommand("set input numpad5 tog_region_uni 4");
+   p.consolecommand("set input 6 tog_region_uni 5"); p.consolecommand("set input numpad6 tog_region_uni 5");
+   p.consolecommand("set input 7 tog_region_uni 6"); p.consolecommand("set input numpad7 tog_region_uni 6");
+   p.consolecommand("set input 8 tog_region_uni 7"); p.consolecommand("set input numpad8 tog_region_uni 7");
 // --------- group 2 ---------------------------------------------------
    p.consolecommand("set input u tog_lockz");
    p.consolecommand("set input o tog_lockxy");
@@ -1549,17 +1577,12 @@ exec function tog_laser(){
    mode_laser++;
    if(mode_laser>2) mode_laser = 0;
    if(mode_laser==0){
-      laserdot.setlocation(vect(32767,32767,32767));
+      if(laserdpn!=none) laserdpn.setlocation(vect(32767,32767,32767));
+      if(laserdot!=none) laserdot.setlocation(vect(32767,32767,32767));
       sens_mov = none;  // forget mover
       return;
-   }
-   if(mode_laser==1){                     // ??????
+   }else
       sens_trig = none; // forget trigger
-      return;
-   }
-   if(mode_laser==2){
-      sens_trig = none; // forget trigger
-   }
 }
 
 exec function tog_ignore(){
@@ -1605,8 +1628,6 @@ exec function tog_show_player(){
    if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_f5;
    ena_player = !ena_player;
-//   mode_player++;
-//   if(mode_player > 3) mode_player = 0;
 }
 
 exec function tog_show_all_layers(){
@@ -1665,7 +1686,7 @@ exec function tog_dpn_fall(){
    if(mb_fail_confirm()) return;
    key_when = 0.3; last_kw = kw_f;
    mode_dpn_fall++;
-   if(mode_dpn_fall>2) mode_dpn_fall=0;
+   if(mode_dpn_fall>3) mode_dpn_fall=0;
 }
 
 exec function tog_dpn_autospawn(){
@@ -1677,57 +1698,24 @@ exec function tog_dpn_autospawn(){
    if(mode_autospawn==2) autospawn_interval = 128.0;
 }
 
-function dpn_spawn(bool bSummonLike){ // todo track laser state
-    local PathNodeRuntime dpn;
-    local vector sp_loc;
-    local vector dpn_newpos,hitnor; // trace related
-    local pawn p;
-    local vector x,y,z;
-    local rotator r;
-    if(owner==none) return;
-    p = pawn(owner);
-    if(p==none) return;
-    r = p.viewrotation;
-    sp_loc = p.location;
-    if(bSummonLike){
-       getaxes(r,x,y,z);
-       sp_loc += 56*x;
-       sp_loc.z += 15;
-    }
-    if(mode_laser == 1){
-       sp_loc = laserdot.location;
-    }
-    dpn = spawn(class'PathNodeRuntime',,,sp_loc);
-    if(mode_dpn_fall==1) return;
-    dpn_newpos = vect(32767,32767,32767);
-    if(mode_dpn_fall==2){
-//     trace(dpn_newpos,hitnor,p.location+vect(0,0,-1024),p.location,true); // we need only z of this
-       dpn_newpos.x = sp_loc.x;
-       dpn_newpos.y = sp_loc.y;
-       dpn_newpos.z = p.location.z; //2026-01-19: just use playerz instead of trace
-    }else if(mode_dpn_fall==0){
-       trace(dpn_newpos,hitnor,sp_loc+vect(0,0,-1024),sp_loc,true);
-    }
-    dpn_newpos.z += dpn_addz_narrow;
-    if(dpn != none) dpn.setlocation(dpn_newpos);
+function dpn_spawn(){
+   local PathNodeRuntime dpn;
+   if(laserdpn==none) return;
+    dpn = spawn(class'PathNodeRuntime',,,laserdpn.location);
 }
+
 function dpn_replace(vector l){
     local vector dpn_newpos,hitnor;
     dpn_newpos = vect(32767,32767,32767);
     trace(dpn_newpos,hitnor,l+vect(0,0,-1024),l,true);
-    dpn_newpos.z += dpn_addz_narrow;
+    dpn_newpos.z += autofall_floordist;
     spawn(class'PathNodeRuntime',,,dpn_newpos);
 }
 
 function PathNodeRuntime FindDPN(vector search_location, float range_sensitivity){
    local PathNodeRuntime t;
-   foreach RadiusActors(class'PathNodeRuntime', t, range_sensitivity) return t;
-   return none;
-}
-
-function PathNode FindRPN(vector search_location, float range_sensitivity){
-   local PathNode t;
-   foreach RadiusActors(class'PathNode', t, range_sensitivity) return t;
+   if(laserdpn==none) return none; // potential spawnspam here but we protect tick() before call this
+   foreach RadiusActors(class'PathNodeRuntime', t, range_sensitivity) if(t!=laserdpn) return t;
    return none;
 }
 
@@ -1737,11 +1725,11 @@ function do_diag_z(){
    local int i, j;
    local bool bDup;
    bDup = false;
-   if(laserdot==none) bDup = true; // cancer code but safe to use bdup. returnless protection against iterating laser
+   if(laserdpn==none) bDup = true; // cancer code but safe to use bdup. returnless protection against iterating laser
    presets_nmax = 0;
    foreach AllActors(class'pathnoderuntime', pn){ // collect
       if(bdup) goto skip_diagz_nolaser;
-      if(pn==laserdot) continue;
+      if(pn==laserdpn) continue;
       skip_diagz_nolaser:   // evaded "accessed none" error. no need to bdup=false, it will be done anyway later
       if(presets_nmax >= 64) break;
       pnz = pn.location.z; 
@@ -1866,18 +1854,16 @@ function altfire(float f){
    local pathnoderuntime pn;
    p = playerpawn(owner);
    if(p == none) return;
-   if(laserdot == none) return;
    key_when = 0.3; last_kw = kw_rmb;
    p.consolecommand("killpawns");
    getaxes(p.viewrotation,x,y,z);
-   if(mode_laser == 1){
-      y = laserdot.location;
+   y = p.location + 56*x;
+   rad = 80;
+   if(mode_laser==1 || mode_laser==2){
+      if(laserdpn==none) y = laserdpn.location;
       rad = 64;
-   }else if(mode_laser == 0){
-      y = p.location + 32*x;
-      rad = 80;
    }
-   foreach radiusactors(class'PathNodeRuntime',pn,rad,y) if(pn!=laserdot) pn.destroy();
+   foreach radiusactors(class'PathNodeRuntime',pn,rad,y) if(pn!=laserdpn) pn.destroy();
 }
 
 function fire(float f){
@@ -1919,10 +1905,11 @@ function fire(float f){
 }
 
 exec function sci_user_dpn_spawn(){  // middlemouse
-   dpn_spawn(true);
+   dpn_spawn();
 }
 
 defaultproperties{
+  laserdpn=None
   laserdot=None
   mode_laser=0
   SHR_Factor_scanmap=SHR_Factor_default
@@ -1931,14 +1918,14 @@ defaultproperties{
   global_offset_x=0
   global_offset_y=0
   vert_discretization=128.0
-  autofall_floordist=61.0
+  autofall_floordist=24.0
   bDisableAllBtnsNotify=false
   bDisableLRmouseNotify=false
   bEnableMmouseNotify=false
   bUseUntrigger=false
   ena_lockz=true
   ena_lockxy=true
-  mode_dpn_fall=2
+  mode_dpn_fall=0
   ena_2xzoom=true
   ena_4xzoom=false
   scrshot_timer=0.0
@@ -1950,7 +1937,7 @@ defaultproperties{
   mode_rayprocess=RP_ClientLike
   mode_oper=MO_Scan
   mode_confirm=MC_Reset
-  ena_player=false
+  ena_player=true
   mode_mwheel=2
   mode_step=2
   mode_texsize=2
@@ -1979,8 +1966,6 @@ defaultproperties{
   enab_region(5)=0
   enab_region(6)=0
   enab_region(7)=0
-//  enab_region(8)=0
-//  enab_region(9)=0
   region_scale(0)=16.0;
   region_scale(1)=16.0;
   region_scale(2)=16.0;
@@ -2006,23 +1991,17 @@ function vector NewScreenToWorld(vector ScreenLoc, float ScreenWidth, float Scre
     local float  tanFOV, Scale;
     local vector tmpWorldLoc, vLook, WorldLoc;
     local vector axesX, axesY, axesZ;
-
     ScreenWidthHalf    = ScreenWidth  / 2;
     ScreenHeightHalf= ScreenHeight / 2;
-
     tanFOV = tan(FOV * Pi / 360.0);
     Scale = tanFOV / ScreenWidthHalf;
-
     tmpWorldLoc.Y = (ScreenLoc.X - ScreenWidthHalf)  * Scale;
     tmpWorldLoc.Z = (ScreenHeightHalf - ScreenLoc.Y) * Scale;
     tmpWorldLoc.X = 1;
-
     GetAxes(CamRot, axesX, axesY, axesZ);
     vLook = tmpWorldLoc.X * axesX + tmpWorldLoc.Y * axesY + tmpWorldLoc.Z * axesZ;
     vLook = normal(vLook);
-
     WorldLoc = CamLoc + vLook / Scale;
-
     return WorldLoc;
 }
 
@@ -2031,25 +2010,18 @@ function vector NewWorldToScreen(vector WorldLoc, float ScreenWidth, float Scree
     local float  tanFOV, Scale, a, b, c;
     local vector tmpWorldLoc, vLook, ScreenLoc;
     local vector axesX, axesY, axesZ;
-
     ScreenWidthHalf    = ScreenWidth  / 2;
     ScreenHeightHalf= ScreenHeight / 2;
-
     tanFOV = tan(FOV * Pi / 360.0);
     Scale = tanFOV / ScreenWidthHalf;
-
     GetAxes(CamRot, axesX, axesY, axesZ);
-
     vLook = WorldLoc - CamLoc;
-
     a = (vLook dot axesX) * Scale;
     b = vLook dot axesY;
     c = vLook dot axesZ;
-
     ScreenLoc.X = ScreenWidthHalf  + b / a;
     ScreenLoc.Y = ScreenHeightHalf - c / a;
     ScreenLoc.Z = 1;
-
     return ScreenLoc;
 }
 */
