@@ -407,7 +407,7 @@ exec function prod(){
    i=0;
    i_max = !reg_unused ? alignz_seek : presets_nmax;
    for(i=0; i<=i_max; i++){                   // sortz counter shows last array, not qty, so 0..19 is actually 20
-      if(!reg_unused && region_usedby[i]!=9) continue;
+      if(!reg_unused && region_usedby[i]==9) continue;
       tmp_s = ""; if(i<10) tmp_s $= "0"; tmp_s $= string(i);
       log(" #exec texture import file=\"textures\\"$common_texname$"\\amd_"$common_texname$"_"
          $tmp_s$".png\" name=\"amd_"$common_texname$"_"$tmp_s$"\" mips=1 flags=0 btc=-1",'AMS');
@@ -423,20 +423,20 @@ exec function prod(){
       log("   SHR_factor="$SHR_Factor_prodmap,'AMS');
       log("   FloorHeight="$VertDiscretization,'AMS');
    for(i=0; i<=i_max; i++){
-      if(!reg_unused && region_usedby[i]!=9) continue;
+      if(!reg_unused && region_usedby[i]==9) continue;
       tmp_s = ""; if(i<10) tmp_s $= "0"; tmp_s $= string(i);
       log("   MapTex("$i$")=texture'amd_"$common_texname$"_"$tmp_s$"'",'AMS');
   }for(i=0; i<=i_max; i++){
-      if(!reg_unused && region_usedby[i]!=9) continue;
+      if(!reg_unused && region_usedby[i]==9) continue;
       tmp_ss = !reg_unused ? string(int(region_align[region_usedby[i]].x)) : string(int(global_offset_x));
       log("   AlignX("$i$")="$ tmp_ss, 'AMS');
   }for(i=0; i<=i_max; i++){
-      if(!reg_unused && region_usedby[i]!=9) continue;
+      if(!reg_unused && region_usedby[i]==9) continue;
       tmp_ss = !reg_unused ? string(int(region_align[region_usedby[i]].y)) : string(int(global_offset_y));
       log("   AlignY("$i$")="$ tmp_ss, 'AMS');
   }for(i=0; i<=i_max; i++){
-      if(!reg_unused && region_usedby[i]!=9) continue;
-      tmp_ss = !reg_unused ? string(int(region_usefloor[i])) : string(int(presets_z[i]));
+      if(!reg_unused && region_usedby[i]==9) continue;
+      tmp_ss = !reg_unused ? string(int(presets_z[region_usefloor[i]])) : string(int(presets_z[i]));
       log("   AlignZ("$i$")="$ tmp_ss,'AMS');
   }   log(" }",'AMS');
       log(" ",'AMS');
@@ -446,7 +446,7 @@ exec function prod(){
       log(" ==  CHECK PATHS BEFORE LAUNCH. FFMPEG REQUIRED  ==",'AMS');
       log(" ==================================================",'AMS');
    for(i=0; i<=i_max; i++){
-      if(!reg_unused && region_usedby[i]!=9) continue;
+      if(!reg_unused && region_usedby[i]==9) continue;
       tmp_s = ""; if(i<10) tmp_s $= "0"; tmp_s $= string(i);
       tmp_ss = !reg_unused ? string(region_sizetex[region_usedby[i]]) : string(size_tex);
       log(" ffmpeg -i "$tmp_s$".png -q:v 0 -qmin 1 -vf \"crop="$tmp_ss$":"$tmp_ss$":"$
@@ -1190,7 +1190,6 @@ function postrender(canvas c){
    c.setpos(max_size_tex+hud_maptex_offset_x, 0);
     c.drawtile(texture'scipixel', hardcode_scrw-max_size_tex-hud_maptex_offset_x, hardcode_scrh, 0,0,4,4);
  skip_maintex_border_clip:
-// }
 // ---- level nav camera -----------------------------------------------------
    c.drawcolor = pc_wh;
    getaxes(p.viewrotation,x,y,z);                 // 16:9 @ 106 fov
@@ -1252,7 +1251,6 @@ function postrender(canvas c){
    if(mode_oper==MO_Mark){  pc_tmp = pc_blue;   }
    if(mode_oper==MO_Prod){ str_tmp = "*EXPORT*"; pc_tmp = (int(level.timeseconds/0.5) % 2)==0 ? pc_green : pc_teal; }
    upy = draw_key_action(c, pc_tmp, kw_ent, "<Ent>", str_tmp, upx, upy);
-
    // -------------------
    upx = x_hdr_lvl_ctl; upy = y_hdr_lvl_ctl;
    c.drawcolor = pc_orange;
@@ -1422,7 +1420,6 @@ function postrender(canvas c){
       c.setpos(upx,upy); c.drawtext("   to leave this mode."); upy += fonh;
       upy = draw_key_action(c, pc_green, kw_ijkl, "<IK>", "select var",  upx, upy);
       upy = draw_key_action(c, pc_green, kw_ijkl, "<JL>", "change",  upx, upy);
-      
       upx = x_col_oper; upy = y_hdr_region;
       c.drawcolor = pc_orange; c.setpos(upx,upy); c.drawtext("FloorDist:");
       upx = x_col_oper + (11*fonw);
@@ -1448,9 +1445,8 @@ function postrender(canvas c){
    upx = x_rcol; upy = y_rcol_texdata;
    pc_tmp = mode_oper==MO_Mark ? pc_wh : pc_gray;
    upy = draw_key_action(c, pc_tmp, kw_none, "", "AlignZ fill", upx, upy);
-   // -------------------
+   // --- fill monitor ----------------
    upx = x_rcol; upy = y_rcol_texdata_fill;
-   // fill monitor code here
    for(k=0;k<8;k++){
       for(i=0;i<8;i++){
          j = (k*8)+i;
@@ -2269,3 +2265,64 @@ defaultproperties{
   region_sizetex(7)=128;
   order_welcome_msgs=0
 }
+
+// // ================================================================
+// // Area map. Texture/align supplier for client renderers.
+// // Set group='activate' to allow client weapons to acquire map.
+// // Used for collectible intel, with DataStart above 0 to prevent
+// // overwriting of client's existing data.
+// // LIMITATIONS: 1. SHR_factor is uniform for all textures
+// //              2. 63 textures max, 1024x1024 max
+// // AUTOEXEC: redefine postbeginplay() to invoke provide_data()
+// // Data acquisition performed on clients thru GetPropertyText()
+// // ================================================================
+// class AreaMapData extends Info abstract;
+// #exec texture import file="textures\icon_areamap.bmp" name="icon_areamap" package="linescomm" mips=1 flags=0 btc=-2
+// var() byte DataStart;      // from where to copy data, used for discoverable multiple maps
+// var() texture MapTex[63];  // payload
+// var() int AlignX[63],AlignY[63],AlignZ[63]; // align
+// var() byte SHR_factor;     // bitshift factor (pixel to uu scale)
+// var() float FloorHeight;    // AreaZ height if other than 128
+// var() string NextAMDActor; // further linkage (use group, not name)
+// var float dataprovider_timer;
+// 
+// function tick(float f){
+//    dataprovider_timer -= f;
+//    if(dataprovider_timer <= 0){
+//       if(instr(caps(string(self.group)),"ACTIVATE") != -1) provide_data();
+//       dataprovider_timer = 10.0;
+//    }
+// }
+// 
+// function provide_data(){
+//    local playerpawn pp;
+//    self.group = 'sci_areamap';
+//    foreach allactors(class'playerpawn',pp) pp.consolecommand("sci_install_areamap");
+//    disable('tick');
+// }
+// 
+// function postbeginplay(){
+//    dataprovider_timer = 10.0;
+//    enable('tick');
+// }
+// 
+// defaultproperties{
+//   Texture=texture'icon_areamap'
+//   SHR_factor=4
+//   DataStart=0
+//   FloorHeight=128.0
+//   bHidden=true
+//   bHiddenEd=false
+// }
+// 
+// 
+// // ================================================================
+// // Interactive region reactor
+// // Usage: execute RenderTexture() on your client.
+// // 128 regions max. Spawn more if neccessary.
+// // ================================================================
+// class AreaReactorData extends Info abstract;
+// var() string NextARDActor; // linkage
+// 
+// function RenderTexture(scriptedtexture tex){
+// }
