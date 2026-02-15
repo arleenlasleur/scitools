@@ -27,8 +27,8 @@ var globalconfig bool bDisableLRmouseNotify;
 var globalconfig bool bEnableMmouseNotify;
 var globalconfig bool bUseUntrigger; // cycle call of trigger, mover trigger()/untrigger() if true [requires TriggerControl state],
                                      //  or trigger() only if false
-var globalconfig bool b_SPAWNFLOODWARN_AutoDPNafterSummon; // autoexec mapinit() in postbeginplay(), also hide welcome clientmsg[] info
-var globalconfig bool b_MY_USERINI_READONLY_AutoBindKeys; // allow "set input" code, cause overwrite of user.ini settings
+var globalconfig bool b_SPAWNFLOOD_WARN_AutoDPNafterSummon; // autoexec mapinit() in postbeginplay(), also hide welcome clientmsg[] info
+var globalconfig bool b_MY_USERINI_IS_READONLY_AutoBindKeys; // allow "set input" code, cause overwrite of user.ini settings
 var float presets_z[64];               // selectable layers z
 var byte presets_nmax;               // selectable total (inclusive, lay0...lay19 = 20 layers)
 var float global_offset_x,global_offset_y; // map center vs world position for texture
@@ -86,6 +86,7 @@ var bool sens_ignore;
 var bool ena_prod;                   // execute prod sequence if true
 var byte order_welcome_msgs;
 var float welcome_msgs_timer;
+var bool ena_ams_render;             // global disable, to preview fullscr level
 // ============================================================================================================
 // CALIBRATION DATA. Added to eliminate magicnumbers from code.
 // ============================================================================================================
@@ -459,225 +460,199 @@ exec function prod(){
    done_layerz = 0;
    scrshot_timer = 2.0;
 }
+
+function CheckVersion()
+{
+    local int VersionInt;
+
+    // Convert the string version to an integer for easy comparison
+    VersionInt = int(Level.EngineVersion);
+
+}
+
 exec function q(){
+   local int iv;
    local playerpawn p;
+   local string c_cmd,c_ucon,c_link,c_var,c_key,c_str;
    if(owner==none) return;
    p = playerpawn(owner);
    if(p==none) return;
+   iv = int(Level.EngineVersion);
+   c_cmd  = "";
+   c_ucon = "";
+   c_link = "";
+   c_var  = "";
+   c_str  = "";
+   if(iv>=227){
+      c_cmd  = chr(27) $ chr(190) $ chr(190) $ chr(240);
+      c_ucon = chr(27) $ chr(120) $ chr(255) $ chr(120);
+      c_link = chr(27) $ chr(80)  $ chr(80)  $ chr(255);
+      c_var  = chr(27) $ chr(240) $ chr(190) $ chr(240);
+      c_key  = chr(27) $ chr(255) $ chr(255) $ chr(60);
+      c_str  = chr(27) $ chr(255) $ chr(255) $ chr(255);
+   }
    p.clientmessage("Welcome to AMS - semiautomatic areamap production tool.");
    p.clientmessage(" ");
-   p.clientmessage("AMS use PathNode runtime-placeable equivalent as epicenters of raytracing");
-   p.clientmessage(" to construct hull/walls and solid collision. Due to collision reactivity with");
-   p.clientmessage(" bCollideActors, most puckups and deco are auto-removed. You can clean excessive");
-   p.clientmessage(" scan obstacles in PNG editor.");
-   p.clientmessage("Your task is to spawn PathNodeRuntime, or dummy pathnodes, DPN, on level -");
-   p.clientmessage(" lots enough to do effective walls scan, though less enough to don't cause");
-   p.clientmessage(" FPS freeze. Always remember, Unreal Virtual Machine works in single-thread");
-   p.clientmessage(" manner on single core of CPU. Because of this, even if you have very powerful");
-   p.clientmessage(" processor such as latest Ryzens, excessive raycasting will eat framerate.");
-   p.clientmessage("In build, or DPN placement mode, many measures were taken to minimize load.");
-   p.clientmessage(" Laggy performance while max quality mode won't be long; after export is");
-   p.clientmessage(" done, AMS will return to build mode.");
-   p.clientmessage("This version almost got rid of scanning artifacts, but this may lead to some");
-   p.clientmessage(" objects inconsistency. This behavior fixed by special mode of scanning actors");
-   p.clientmessage(" when placing these, called strict walls/directional anywalls. Even hill/slope");
-   p.clientmessage(" will count as \"wall\", so directional DPNs must have correct scan angle and");
-   p.clientmessage(" rotation to minimize artifacts.");
+   p.clientmessage("              Getting started");
    p.clientmessage(" ");
-   p.clientmessage("Navigation:");
-   p.clientmessage("W/A/S/D, Spc, C - regular move.");
-   p.clientmessage("Alt - single-key dodge. Used in pair with dodge direction keys (move keys).");
-   p.clientmessage(" If player stand still, does nothing. Diagonal directions are auto-detected.");
-   p.clientmessage(" In water, just increase speed shortly. Acts as some kind of flying replacement.");
-   p.clientmessage("Repeat C three times - request autofly mode. Repeat time window is 0.4/0.4 sec.");
-   p.clientmessage(" Acts same as \"fly\" console command. If user flying no higher than 56uu from");
-   p.clientmessage(" floor surface, autowalk will be triggered. Autofly step resets in 1.2 sec.");
-   p.clientmessage("P - disable water flag of current zone. This action can't be undone.");
-   p.clientmessage(" Use \"editactor class=zoneinfo\" console command to revert the effect.");
-   p.clientmessage(" Pain flag is always auto-disabled in all zones. Player is set to amphibious.");
+   p.clientmessage("By default AMS do not bind its keys to user console, because users complained. Simultaneous assign of both user keys and AMS keys is useless, some of them MUST be removed to make things working properly. For example, AMS uses <T> key which is assigned to teamspeak. Follow these instructions to override:");
    p.clientmessage(" ");
-   p.clientmessage("Zooms, steps/scale related:");
-   p.clientmessage("Z, X - digital and spatial zoom. Digital zoom enlarge map pixels, can be set to");
-   p.clientmessage(" 1x, 2x, 4x. Spatial zoom controls SHR_Factor, or actual vectors division.");
-   p.clientmessage(" More divided coords means less level area, i. e. more zoom. Can be set to");
-   p.clientmessage(" these factors: 1px = 32uu, 16uu, 8uu, 4uu, 2uu. Both types of zoom cause less");
-   p.clientmessage(" CPU load due to less processing.");
-   p.clientmessage("B - control step size of map offset, when horizontal lock (aka lock XY)");
-   p.clientmessage(" disabled. Spoken terms are described further.");
-   p.clientmessage("G - control the size of map black texture, aka region size. Both controls");
-   p.clientmessage(" are working in zoom manner (key toggle 3 values).");
+   p.clientmessage("1. Save AMS config to write scitools.ini if it doesn't exist, then terminate:");
+   p.clientmessage(c_ucon$"   savecfg");
+   p.clientmessage(c_ucon$"   exit");
+   p.clientmessage("2. Edit config:");
+   p.clientmessage(c_cmd$"   notepad scitools.ini");
+   p.clientmessage("3. Change autobind variable this way:");
+   p.clientmessage(c_var$"   b_MY_USERINI_IS_READONLY_AutoBindKeys=True");
+   p.clientmessage("4. Save file, close it and relaunch unreal. You need R/O attribute set on user.ini file, or use another copy of it. To specify separate user.ini, use command: "$c_cmd$"unreal %1 userini=user_ams.ini "$c_str$" where %1 is name of .unr file.");
    p.clientmessage(" ");
-   p.clientmessage("Lock/offset:");
+   p.clientmessage("AMS use PathNode runtime-placeable equivalent as epicenters of raytracing to construct hull/walls and solid collision. Due to collision reactivity with bCollideActors, most puckups and deco are auto-removed. You can clean excessive scan obstacles in PNG editor like GIMP, PS or mspaint. AMS also supports raytracing from bStatic normal PAthNodes, but this feature is transitional. I will debug it further.");
+   p.clientmessage("Your task is to spawn PathNodeRuntime, or dummy pathnodes, DPN, on level - lots enough to do effective walls scan, though less enough to don't cause FPS freeze. Always remember, Unreal Virtual Machine works in single-thread manner on single core of CPU. Because of this, even if you have very powerful processor such as latest Ryzens, excessive raycasting will eat framerate. In build, or DPN placement mode, many measures were taken to minimize load. Laggy performance while max quality mode won't be long; after export is done, AMS will return to build mode.");
+   p.clientmessage("General hint: place DPNs near walls at every walkable places.");
+   p.clientmessage("This version almost got rid of scanning artifacts, but this may lead to some objects inconsistency. This behavior fixed by special mode of scanning actors when placing these, called strict walls/directional anywalls. Even hill/slope will count as \"wall\", so directional DPNs must have correct scan sector and rotation to minimize artifacts.");
    p.clientmessage(" ");
-   p.clientmessage("U - LockZ aka lock layer - snap map vertically, or inherit AreaZ from PlayerZ.");
-   p.clientmessage(" Good for realtime scan result preview.");
-   p.clientmessage("O - LockXY - snap center of map to center of player X;Y coords in level. Making");
-   p.clientmessage(" search of player marker less necessary.");
-   p.clientmessage("R - toggle axis which will be altered by mouse wheel, with selected step size.");
-   p.clientmessage("I/J/K/L - horizontal offset, acts same as mouse wheel in X, Y mode.");
-   p.clientmessage("PgUp/PgDn - vertical offset, same as wheel in Z mode. Controls AreaZ presets,");
-   p.clientmessage(" which can be obtained by diag mode.");
+   p.clientmessage("              Navigation:");
+   p.clientmessage(c_key$"W/A/S/D, Spc, C"$c_str$" - regular move.");
+   p.clientmessage(c_key$"Alt"$c_str$" - single-key dodge. Used in pair with dodge direction keys (move keys).");
+   p.clientmessage(" If player stand still, does nothing. Diagonal directions are auto-detected. In water, just increase speed shortly. You may train some bunnyhopping timing with it.");
+   p.clientmessage("Repeat "$c_key$"C"$c_str$" three times - request autofly mode. Repeat time window is 0.4/0.4 sec.");
+   p.clientmessage(" Acts same as \"fly\" console command, but without raising user's hand from mouse. If flying no higher than 56uu from floor surface, autowalk will be triggered. Autofly step resets in 1.2 sec.");
+   p.clientmessage(c_key$"P"$c_str$" - disable water flag of current zone. This action can't be undone. Use "$c_ucon$"editactor class=zoneinfo"$c_str$" console command to revert the effect. Pain flag is always auto-disabled in all zones. Player is set to amphibious.");
    p.clientmessage(" ");
-   p.clientmessage("User/misc features:");
-   p.clientmessage("T - toggle mover ignore. Useful for eliminating horizontal lifts as obstacle.");
-   p.clientmessage("Y - searchlight. Useful in very dark places of level.");
-   p.clientmessage("Q - toggle laser mode; off, infinite minus some distance from walls, or finite");
-   p.clientmessage(" with max length from player. Infinite laser is colliding, finite laser is always");
-   p.clientmessage(" ghostmode. Useful for DPN placement in player-unreachable spots. Any mode");
-   p.clientmessage(" of laser switch coords monitor to show laser instead of player. Used to create");
-   p.clientmessage(" map reactors (interactive regions of player interest such as open/closed doors,");
-   p.clientmessage(" fences, inactive/active lifts etc). Laser show nowspawning DPN render result");
-   p.clientmessage(" as pink color walls of map.");
-   p.clientmessage("(no key) - player marker, automatic (forced off in prod mode, on in other modes).");
+   p.clientmessage("              Zooms, steps/scale related:");
+   p.clientmessage(c_key$"Z, X"$c_str$" - digital and spatial zoom. Digital zoom enlarge map pixels, can be set to 1x, 2x, 4x. Spatial zoom controls SHR_Factor, or actual vectors division.");
+   p.clientmessage(" More divided coords means less level area, i. e. more zoom. Can be set to these factors: 1px = 32uu, 16uu, 8uu, 4uu, 2uu. Both types of zoom cause less CPU load due to less processing.");
+   p.clientmessage(c_key$"B"$c_str$" - control step size of map offset, when horizontal lock (aka lock XY) disabled. Spoken terms are described further.");
+   p.clientmessage(c_key$"G"$c_str$" - control the size of map black texture, aka region size. Both controls are working in zoom manner (key toggle 3 values).");
    p.clientmessage(" ");
-   p.clientmessage("DPN (dummy pathnode) placement:");
-   p.clientmessage("F - let them sit in spawned area (flying), autofall on floor (with floordist)");
-   p.clientmessage(" or copy height of player/laser (inherit z)");
-   p.clientmessage("V - autospawn them");
-   p.clientmessage("H - toggle directional mode with setting of horizontal scan angle. These DPNs");
-   p.clientmessage(" produce rendering artifacts if pointed to incorrect places such as walkable");
-   p.clientmessage(" hills, floors, slopes, climbable rocks. Regular DPNs protecting from artifacts");
-   p.clientmessage(" by checking wall vertical angle, but won't recognize some unwalkable obstacles");
-   p.clientmessage(" and show these as empty space.");
-   p.clientmessage("Mid mouse/wheel press - spawn DPN in manual mode. Always available.");
-   p.clientmessage("Right mouse - kill all pawns in level and remove DPNs in area. Spawn/remove");
-   p.clientmessage(" does respecting laser, which is useful for increased precision DPNs placement.");
+   p.clientmessage("              Lock/offset:");
+   p.clientmessage(c_key$"U"$c_str$" - LockZ aka lock layer - snap map vertically, or inherit AreaZ from PlayerZ. Good for realtime scan result preview.");
+   p.clientmessage(c_key$"O"$c_str$" - LockXY - snap center of map to center of player X;Y coords in level. Making search of player marker less necessary.");
+   p.clientmessage(c_key$"R"$c_str$" - toggle axis which will be altered by mouse wheel, with selected step size.");
+   p.clientmessage(c_key$"I/J/K/L"$c_str$" - horizontal offset, acts same as mouse wheel in X, Y mode.");
+   p.clientmessage(c_key$"PgUp/PgDn"$c_str$" - vertical offset, same as wheel in Z mode. Controls AreaZ presets, which can be obtained by diag mode.");
+   p.clientmessage(" ");
+   p.clientmessage("              User/misc features:");
+   p.clientmessage(c_key$"T"$c_str$" - toggle mover ignore. Useful for eliminating horizontal lifts as obstacle.");
+   p.clientmessage(c_key$"Y"$c_str$" - searchlight. Useful in very dark places of level.");
+   p.clientmessage(c_key$"Q"$c_str$" - toggle laser mode; off, infinite minus some distance from walls, or finite with max length from player.");
+   p.clientmessage(" Infinite laser is colliding, finite laser is always ghostmode. Useful for DPN placement in player-unreachable spots. Any mode of laser switch coords monitor to show laser instead of player. Used to create map reactors (interactive regions of player interest such as open/closed doors, fences, inactive/active lifts etc). Laser show nowspawning DPN render result as pink color walls of map.");
+   p.clientmessage(c_cmd$"(no key)"$c_str$" - player marker, automatic (forced off in prod mode, on in other modes).");
+   p.clientmessage(" ");
+   p.clientmessage("              DPN placement:");
+   p.clientmessage(c_key$"F"$c_str$" - let them sit in spawned area (flying), autofall on floor (with floordist) or copy height of player/laser (inherit z)");
+   p.clientmessage(c_key$"V"$c_str$" - autospawn them");
+   p.clientmessage(c_key$"H"$c_str$" - toggle directional mode with setting of horizontal scan angle.");
+   p.clientmessage(" These DPNs produce rendering artifacts if pointed to incorrect places such as walkable hills, floors, slopes, climbable rocks. Regular DPNs protecting from artifacts by checking wall vertical angle, but won't recognize some unwalkable obstacles and show these as empty space.");
+   p.clientmessage(c_key$"Mid mouse/wheel press"$c_str$" - spawn DPN in manual mode. Always available.");
+   p.clientmessage(c_key$"Right mouse"$c_str$" - kill all pawns in level and remove DPNs in area. Spawn/remove does respect laser, which is useful for increased precision DPNs placement.");
    p.clientmessage(" ");
    p.clientmessage("Left mouse:");
-   p.clientmessage("-> When laser is off, open by trigger. All triggers are active, triggerable,");
-   p.clientmessage(" norepeatable. If movers tagged to trigger, these will be started (executes");
-   p.clientmessage(" mover.trigger() or mover.untrigger() on them). Untrigger() call is disabled");
-   p.clientmessage(" by default; this behavior controlled by bUseUntrigger variable in scitools.ini");
-   p.clientmessage("-> When laser is on, open by mover.");
-   p.clientmessage("-> Always, when held for more than 0.6 sec,");
-   p.clientmessage(" enable better quality of map scan for quick preview.");
+   p.clientmessage(c_ucon$"->"$c_str$" When laser is off, open by trigger. All triggers are active, triggerable, norepeatable.");
+   p.clientmessage(" If movers tagged to trigger, these will be started (executes mover.trigger() or mover.untrigger() on them). Untrigger() call is disabled by default; this behavior controlled by bUseUntrigger variable in scitools.ini");
+   p.clientmessage(c_ucon$"->"$c_str$" When laser is on, open by mover.");
+   p.clientmessage(c_ucon$"->"$c_str$" Always, when held for more than 0.6 sec, enable better quality of map scan for quick preview.");
    p.clientmessage(" ");
-   p.clientmessage("Operation mode:");
-   p.clientmessage("F1 - build bode. Used for DPN placement and convenient navigation by map.");
+   p.clientmessage("              Operation mode:");
+   p.clientmessage(c_key$"F1"$c_str$" - build bode. Used for DPN placement and convenient navigation by map.");
    p.clientmessage(" Sets these display behavior defaults:");
-   p.clientmessage(" -> 2x digital zoom    -> 4uu spatial zoom");
-   p.clientmessage(" -> lockZ, lockXY enabled");
-   p.clientmessage("F4 - region markup mode. Used for final align assign layers to certain regions.");
+   p.clientmessage(c_ucon$" ->"$c_str$" 2x digital zoom    "$c_ucon$"->"$c_str$" 4uu spatial zoom    "$c_ucon$"->"$c_str$" lockZ, lockXY enabled");
+   p.clientmessage(c_key$"F4"$c_str$" - region markup mode. Used for final align assign layers to certain regions.");
    p.clientmessage(" Sets these defaults:");
-   p.clientmessage(" -> 1x digital zoom    -> 16uu spatial zoom");
-   p.clientmessage(" -> coords lock disabled    -> max quality");
-   p.clientmessage("F7 - region reconstruct mode, aka AreaZ diagnostics. Performs these actions:");
-   p.clientmessage(" -> all DPNs in level will be collected, and their Z roughed");
-   p.clientmessage("  according to Z discretization (explained further).");
-   p.clientmessage(" -> remove non-unique and sorted;");
-   p.clientmessage("  if set exceed 63 elements of array, more will be ignored");
-   p.clientmessage(" Diag mode may make already used region info irrelevant, so use it before");
-   p.clientmessage(" markup, or with caution. Protected by four keys confirmation");
-   p.clientmessage(" (press 1, 2, 3, 4 sequence) to prevent invoking this accidentally.");
-   p.clientmessage("F8 - production mode. Auto scroll all regions and their layers, screenshoting");
-   p.clientmessage(" the result, writes .uc package template and .bat script template to unreal.log;");
-   p.clientmessage(" use text editor to correct these files to your needs.");
+   p.clientmessage(c_ucon$" ->"$c_str$" 1x digital zoom    "$c_ucon$"->"$c_str$" 16uu spatial zoom    "$c_ucon$"->"$c_str$" coords lock disabled    "$c_ucon$"->"$c_str$" max quality");
+   p.clientmessage(c_key$"F7"$c_str$" - region reconstruct mode, aka AreaZ diagnostics. Performs these actions:");
+   p.clientmessage(" - all DPNs in level will be collected, and their Z roughed according to Z discretization (explained further);");
+   p.clientmessage(" - remove non-unique and sorted;");
+   p.clientmessage(" - if set exceed 63 elements of array, more will be ignored.");
+   p.clientmessage(" Diag mode may make already used region info irrelevant, so use it "$c_var$"before"$c_str$" markup, or "$c_var$"with caution"$c_str$". Protected by four keys confirmation (press 1, 2, 3, 4 sequence) to prevent invoking this accidentally.");
+   p.clientmessage(c_key$"F8"$c_str$" - production mode. Auto scroll all regions and their layers, screenshoting the result, writes .uc package template and .bat script template to unreal.log; use text editor to correct these files to your needs.");
    p.clientmessage(" You can obtain list of screenshots sorted by creation time with command:");
-   p.clientmessage(" %unrealdir%\\system\\screenshots> dir /od /tc /b /a-d > file.bat");
+   p.clientmessage(c_cmd$" %unrealdir%\\system\\screenshots> dir /od /tc /b /a-d > file.bat");
+   p.clientmessage(c_key$"Enter"$c_str$" (in prod mode) - begin export process. After done, AMS will return to build mode.");
    p.clientmessage(" ");
-   p.clientmessage("Config variables (scitools.ini):");
-   p.clientmessage("VertDiscretization - AreaZ sensitivity, the height of zone where actual map");
-   p.clientmessage(" layer shows certain texture");
-   p.clientmessage("vert_floordist - height of most DPNs relative to floor;");
+   p.clientmessage("              Config variables (scitools.ini):");
+   p.clientmessage(c_var$"VertDiscretization"$c_str$" - AreaZ sensitivity, the height of zone where actual map layer shows certain texture.");
+   p.clientmessage(c_var$"AutofallFloordist"$c_str$" - height of most DPNs relative to floor;");
    p.clientmessage(" classic unreal dist is 61uu, narrow floor - 24, narrower - 12");
    p.clientmessage(" narrower may cause some artifacts and excessive lines on stairsteps due to");
    p.clientmessage(" their typical 16uu height.");
-   p.clientmessage("bDisableAllBtnsNotify - do not rogerblink pressed key name in the interface");
-   p.clientmessage("bDisableLRmouseNotify - do not blink for left/right mouse buttons, even if");
-   p.clientmessage(" other keys still enabled");
-   p.clientmessage("bEnableMmouseNotify - blink for mid mouse button as well");
+   p.clientmessage(c_var$"bDisableAllBtnsNotify"$c_str$" - do not rogerblink pressed key name in the interface.");
+   p.clientmessage(c_var$"bDisableLRmouseNotify"$c_str$" - do not blink for left/right mouse buttons, even if other keys still enabled.");
+   p.clientmessage(c_var$"bEnableMmouseNotify"$c_str$" - blink for mid mouse button as well.");
+   p.clientmessage(c_var$"bUseUntrigger"$c_str$" - cycle between executing trigger()/untrigger() on activatables or trigger() only.");
+   p.clientmessage(c_var$"b_SPAWNFLOOD_WARN_AutoDPNafterSummon"$c_str$" - autoexec mapinit command upon summon. Cause overspawn of DPNs if tool summoned twice/more.");
+   p.clientmessage(c_var$"b_MY_USERINI_IS_READONLY_AutoBindKeys"$c_str$" - enable keymapping. Cause user settings overwriting (always). Make copy of file before use.");
    p.clientmessage(" ");
-   p.clientmessage("Regions and prepare to prod:");
-   p.clientmessage("1-8, incl numpad keys - select/toggle region.");
-   p.clientmessage("M - mark region.");
-   p.clientmessage(" Map align on X;Y axis, texture size, spatial zoom will be overwritten.");
-   p.clientmessage("Enter - fill current layer number (aka diag result Z from set) to current");
-   p.clientmessage(" region. Keep X;Y offset unchanged for correct map working in this area.");
-   p.clientmessage(" Already existing Z in current region, if matched, will be removed");
-   p.clientmessage(" if Enter pressed twice; this is how region layer toggle working.");
-   p.clientmessage(" For region occupy navigation, no additional keys implemented, due to lots");
-   p.clientmessage(" of keys used already.");
+   p.clientmessage("              Regions and prepare to prod:");
+   p.clientmessage(c_key$"1-8"$c_str$", incl numpad keys - select/toggle region.");
+   p.clientmessage(c_key$"M"$c_str$" - mark region. Map align on X;Y axis, texture size, spatial zoom of region will be overwritten.");
+   p.clientmessage(c_key$"Enter"$c_str$" (in markup mode) - fill current layer number (aka diag result Z from set) to current region. Keep X;Y offset unchanged for correct map working in this area. Already existing Z in current region, if matched, will be removed if "$c_key$"Enter"$c_str$" pressed twice; this is how region layer toggle working. For region occupy navigation, no additional keys implemented, due to lots of keys used already.");
    p.clientmessage(" ");
-   p.clientmessage("Render:");
-   p.clientmessage("F2 - toggle render mode");
-   p.clientmessage("Leftmouse hold - preview full quality in player area or layer matching by Z.");
+   p.clientmessage("              Render:");
+   p.clientmessage(c_key$"F2"$c_str$" - toggle render mode");
+   p.clientmessage(c_key$"Leftmouse hold"$c_str$" - preview full quality in player area or layer matching by Z.");
+   p.clientmessage("You can switch map render mode to fast/full quality, specific layer (used at export stage), or intellifast mode which is on by default (used while DPN placement as max balance-friendly). Most demanded scale is typically 1:16, because map should be big enough to navigate rooms and small enough for better level coverage. One 1024 texture with 1bpp color will take ~10 kb, so total level may stay around 0.4-1.2 mb. Multiple AreaMapData actors can work transparently, but you will need specialized iterator to render them.");
    p.clientmessage(" ");
-   p.clientmessage("Tips on how to define regions:");
-   p.clientmessage("-> use ALL FAST render mode to preview/positioning overall level");
-   p.clientmessage("-> keep regions edges with zero distance; adjacent region border may disappear");
-   p.clientmessage(" just right 1px far, but not more (2px gap will result in 1px seam on map)");
-   p.clientmessage("-> always use same spatial zoom;");
-   p.clientmessage(" inconsistent scale of coords WILL cause align error");
-   p.clientmessage("-> regions may overlap, but of course this produce some excessive drawcalls");
+   p.clientmessage("              Tips on how to define regions:");
+   p.clientmessage("* use ALL FAST render mode to preview/positioning overall level");
+   p.clientmessage("* keep regions edges with zero distance; adjacent region border may disappear just right 1px far, but not more (2px gap will result in 1px seam on map)");
+   p.clientmessage("* always use same spatial zoom; inconsistent scale of coords "$c_var$"WILL"$c_str$" cause align error");
+   p.clientmessage("* regions may overlap, but of course this produce some excessive drawcalls");
    p.clientmessage(" ");
-   p.clientmessage("Prod mode requirements:");
-   p.clientmessage("-> at least one Z preset in TexData[] array");
-   p.clientmessage(" (press Enter at least once, in at least one region).");
+   p.clientmessage("              Prod mode operation:");
+   p.clientmessage("- If at least one Z preset set in TexData[] array, export will follow this array directions. You can refill it later and do one more export, if 63 map segments are insufficient for your level (your client inventory should support AreaMapData actors linkage).");
+   p.clientmessage("- If array is empty, exports all Z layers discovered by "$c_ucon$"diag"$c_str$" command.");
    p.clientmessage(" ");
-   p.clientmessage("Viewport statusbar:");
+   p.clientmessage("              Z-diagnostics operation:");
+   p.clientmessage("If any ZSet DPNs exist, only them will be iterated as heights source. To return auto mode, use "$c_ucon$"killzsets"$c_str$" command to remove them.");
+   p.clientmessage(" ");
+   p.clientmessage("              Viewport statusbar:");
    p.clientmessage("First number - digital zoom");
-   p.clientmessage("Second, before slash - map spatial zoom, after - prod texture spatial zoom");
-   p.clientmessage(" (aka prod SHR_Factor of .uc template)");
+   p.clientmessage("Second, before slash - map spatial zoom, after - prod texture spatial zoom (aka prod SHR_Factor of .uc template)");
    p.clientmessage("Third number - framerate counter");
-   p.clientmessage("Fourth number - total DPNs in mathing by Z layer / total DPNs in level");
+   p.clientmessage("Fourth number - total DPNs in layer, mathing by Z coord / total DPNs in level");
    p.clientmessage(" ");
-   p.clientmessage("Console commands:");
-   p.clientmessage("init - execute playselect() again, restores all binds;");
-   p.clientmessage(" useful if user.ini is read-only");
-   p.clientmessage("diag - same as switching to diag mode, do Z set diagnostics+store+sort;");
-   p.clientmessage(" may corrupt region/texdata.");
-   p.clientmessage("mapinit - use level pathnodes to place DPN over them, working as initial");
-   p.clientmessage(" build of zero-progress map; this command autoexec diag command.");
-   p.clientmessage("savecfg - store current globalconfig variables to scitools.ini");
-   p.clientmessage("readcfg - read them from scitools.ini");
+   p.clientmessage("              Console commands:");
+   p.clientmessage(c_ucon$"init"$c_str$" - execute playselect() again, restores all keybindings after loadgame; useful if user.ini does not contain binds.");
+   p.clientmessage(c_ucon$"diag"$c_str$" - same as switching to diag mode, do Z set diagnostics+store+sort; may corrupt region/texdata.");
+   p.clientmessage(c_ucon$"mapinit"$c_str$" - use level pathnodes to place DPN over them, working as initial build of zero-progress map; this command autoexec diag command.");
+   p.clientmessage(c_ucon$"killzsets"$c_str$" - remove all ZSet (blue-yellow blinking) DPNs");
+   p.clientmessage(c_ucon$"savecfg"$c_str$" - store current globalconfig variables to scitools.ini");
+   p.clientmessage(c_ucon$"readcfg"$c_str$" - read them from scitools.ini");
+   p.clientmessage(c_ucon$"ams_pause"$c_str$" - pause all raytracing and disable GUI, used for screenshoting places");
+   p.clientmessage(c_ucon$"ams "$c_str$"<cfgvar> - configure certain var, alias of "$c_ucon$"set"$c_str$" console command; cfg vars are:");
+   p.clientmessage("fd - "$c_var$"AutofallFloordist");
+   p.clientmessage("zd - "$c_var$"VertDiscretization");
+   p.clientmessage("shr - "$c_var$"SHR_Factor_prodmap");
+   p.clientmessage("name - "$c_var$"common_texname"$c_str$" (it isn't "$c_cmd$"globalconfig"$c_str$", used for configuring export textures name template)");
+   p.clientmessage("Example: "$c_ucon$"ams shr 4"$c_str$" - set "$c_var$"SHR_Factor_prodmap"$c_str$" to 16.");
    p.clientmessage(" ");
-   p.clientmessage("After all data prepared, AMS works unattended, just enable prod mode and");
-   p.clientmessage(" wait for all screenshots will be taken. Then you can cut them, edit if");
-   p.clientmessage(" you want in any graphics software, then prepare your package files and");
-   p.clientmessage(" use UCC to compile. For cutting screenshoted maps (from fullscreen FHD to");
-   p.clientmessage(" square map region), FFMPEG is required.");
-   p.clientmessage(" It can be installed from https://www.gyan.dev/ffmpeg/builds/");
+   p.clientmessage("After all data prepared, AMS works unattended, just enable prod mode and wait for all screenshots will be taken. Then you can cut them, edit if you want in any graphics software, then prepare your package files and use UCC to compile. For cutting screenshoted maps (from fullscreen FHD to square map region), FFMPEG is required. It can be installed from https://www.gyan.dev/ffmpeg/builds/");
+   p.clientmessage(" ");
+   p.clientmessage("              Working process");
+   p.clientmessage(" ");
+   p.clientmessage("1. Use build mode to place DPN in appropriate places.");
+   p.clientmessage("If you want define Z layers manually, spawn ZSet DPNs. These must stay on every walkable height, aka floors of level.");
+   p.clientmessage("2. Switch to diag mode and approve it. This action is already performed during map init, but another analysis may be necessary (typically if DPNs spawned on never-used by bStatic PNs heights).");
+   p.clientmessage("3. Switch to markup mode to define regions. You can use less than 8 regions. You can leave some of them activated (they never shows in prod mode).");
+   p.clientmessage("4. Assign AlignZ fill array if you plan to use region(s). Otherwise, simply adjust X;Y ofset to fit level in texture.");
+   p.clientmessage("5. Switch to prod mode and press Enter to start.");
+   p.clientmessage("At any stage of production, savegame may be used to keep setings/work.");
+   p.clientmessage("7. Close unreal and open "$c_cmd$"unreal.log");
+   p.clientmessage("8. Search lines starting with \"ams:\" inside it. First occurence is actual file.uc contents for AreaMapData child actor. Second occurence is command(s) for FFMPEG to crop screenshots into textures, which will be used by this class. You need to move first into "$c_cmd$"your_map_package\\classes"$c_str$" folder and cropped textures into "$c_cmd$"your_map_package\\textures"$c_str$" folder");
+   p.clientmessage("9. Enter (new) "$c_var$"EditPackages="$c_str$" line fou your map package in "$c_cmd$"unreal.ini");
+   p.clientmessage("10. Make sure your_map_package.u file doesn't exist and start "$c_cmd$"ucc make"$c_str$" to build it.");
+   p.clientmessage(" ");
+   p.clientmessage("              Export considerations");
+   p.clientmessage(" ");
+   p.clientmessage("It is strongly recommended to do not change default vertical resolution from 128 UU, however, this is supported by AreaMapData prototype actor. I currently don't plan implementing of autostretching it for complex levels, so you will need to do it manually, and maybe rebuild scitools package. Further, maybe FFT for ZSet recognition will be added.");
+   p.clientmessage("Keep an eye on movers, they ideally must stay still while screenshots made. Keep all openable doors already-open, due to");
+   p.clientmessage("solid lines on them, or it will look like noclip cheat when player crosswalk them.");
+   p.clientmessage(" ");
+   p.clientmessage("              Greetz:");
+   p.clientmessage(" Omega, MetallicaFan212, Fumbles McStupid, all people who helped me and who I forgot to mention.");
    return;
-   p.clientmessage("This tool use PathNode and PathNodeRuntime objects as epicenters of raytracing the map. PathNodeRuntime actors");
-   p.clientmessage("are also called DPN (dummy pathnode) and are runtime-spawnable. DPN serve to produce more raytracing if incomplete");
-   p.clientmessage("coverage of map (most cases). There are raytracing artifacts - perpendicular lines on sloped floor surfaces. These");
-   p.clientmessage("can't be evaded and must be cleaned in postprocess (.png editing) in editors like GIMP or PS.");
-   p.clientmessage("General hint: place DPNs near walls at every walkable places.");
-   p.clientmessage(" ");
-   p.clientmessage("Commands:");
-   p.clientmessage("init - reassign hotkeys when loaded .usa file. Prefer to keep your user.ini read/only.");
-   p.clientmessage("diag - sort trucncated z values as map layers. 63 max. Vert resolution: 128 uu. Flags level as ready.");
-   p.clientmessage("prod - start export layers of flagged level (need to run diag cmd at least once).");
-   p.clientmessage("mark - set visible border around current map area (use during export to correctly cut remaining areas).");
-   p.clientmessage("Mark command overwrite old region.");
-   p.clientmessage("During export, areamapdata align data is logged as text. Use unreal.log contents to form the .ucc files");
-   p.clientmessage("for compiling map package. Textures should be cropped, ffmpeg commands also will be included in log.");
-   p.clientmessage("Uncropped screenshots will contain align data as onscreen text. Save it before crop, or keep orig files.");
-   p.clientmessage(" ");
-   p.clientmessage("Display modes and behavior: (switched by 1,2,8,9 keys)");
-   p.clientmessage("You can switch map render mode to fast/full quality, specific layer (used at export stage), or intellifast mode");
-   p.clientmessage("which is on by default (used while DPN placement as max balance-friendly). Most demanded scale is typically 1:16,");
-   p.clientmessage("because map should be big enough to navigate rooms and small enough for better level coverage. One 1024 texture");
-   p.clientmessage("with 1bpp color will take ~10 kb, so total level may stay around 0.4-1.2 mb. Multiple AreaMapData actors can work");
-   p.clientmessage("transparently, but you will need specialized iterator to render them.");
-   p.clientmessage(" ");
-   p.clientmessage("Navigation behavior: (switched by 3,0,-,+ keys)");
    p.clientmessage("Control map snapping to player (horz and/or vert) and DPN spawning mode. Player snap/follow turned on by default.");
-   p.clientmessage(" ");
-   p.clientmessage("Mouse keys behavior:");
-   p.clientmessage("LMB (fire) - always open movers");
-   p.clientmessage("RMB (altfire) - always killpawns / remove closest DPN(s)");
-   p.clientmessage("Wheel - control offset when snapping disabled; press to spawn. Axis select keys - 4,5,6.");
-   p.clientmessage(" ");
-   p.clientmessage("Export considerations:");
-   p.clientmessage("It is strongly recommended to do not change default vertical resolution from 128 UU, however, this is supported");
-   p.clientmessage("by AreaMapData prototype actor. I currently don't plan implementing of it's autostretch it for complex levels,");
-   p.clientmessage("so you will need to do it manually, and maybe rebuild scitools package.");
-   p.clientmessage("Keep an eye on movers, they must stay still while screenshots made. Keep all openable doors already-open, due to");
-   p.clientmessage("solid lines on them, or it will look like noclip cheat when player crosswalk them. About AreaZ[] array contents,");
-   p.clientmessage("you always can execute diag command again if you're unsure on your DPN placement. For combined faded layers (gray");
-   p.clientmessage("inactive map) do merging in editors by multiply/screen blending mode. Rendering whole level is laggy and produce");
-   p.clientmessage("lots of artifacts.");
 }
 // ==================================================================================================================
 function tick(float f){
@@ -959,7 +934,8 @@ function postrender(canvas c){
    local bool nomatch_z; // this z does not match current sel_z or lock_z
    local float yaw_until; // end of sector
    p = playerpawn(owner);
-   if(p==none || inv_finfo==none || lightbeam==none || laserdpn==none || laserdot==none) return;
+   if(!ena_ams_render) return;
+   if(p==none || inv_finfo==none || lightbeam==none || laserdpn==none || laserdot==none) return; // todo remove return
    if(ena_lockxy){              // read it here because faster than tick()
       global_offset_x = (-1) * p.location.x;
       global_offset_y = (-1) * p.location.y;
@@ -1607,6 +1583,8 @@ exec function mapinit(){
    tog_opermode(0);
 }
 function postbeginplay(){
+   local string KeyName, Alias;
+
    local info ifo;
    local inventory w;
    local decoration d;
@@ -1623,6 +1601,12 @@ function postbeginplay(){
    if(laser_sector_sta!=none) laser_sector_sta.bAngleIndicator = true;
    if(laser_sector_end!=none) laser_sector_end.bAngleIndicator = true;
    if(laserdpn        !=none) laserdpn.group = 'AMSLASER';
+
+   // ==============
+//       KeyName = GetPlayerOwner().ConsoleCommand("KEYNAME "$i);
+//       Alias = GetPlayerOwner().ConsoleCommand("KEYBINDING "$KeyName);
+   // ==============
+
    foreach allactors(class'info',ifo){
       if(!ifo.isa('ONPLevelInfo')) ifo.SetPropertyText("MaxHealth","500");
       if(ifo.isa('ZoneInfo')) zoneinfo(ifo).bPainZone = false;
@@ -1666,7 +1650,7 @@ function postbeginplay(){
    }
    tog_opermode(0);    // goto build mode
    resetconfig();
-   if(b_SPAWNFLOODWARN_AutoDPNafterSummon){
+   if(b_SPAWNFLOOD_WARN_AutoDPNafterSummon){
       order_welcome_msgs = 4;
       PickupMessage = "AreaMap CT scan tool. Enter Q in console for more info.";
       mapinit();
@@ -1699,7 +1683,7 @@ function playselect(){
    p.consolecommand("killall decoration");
    p.consolecommand("killall decal");
    p.consolecommand("amphibious");
-   if(!b_MY_USERINI_READONLY_AutoBindKeys) goto skip_by_playselect_nobinds;
+   if(!b_MY_USERINI_IS_READONLY_AutoBindKeys) goto skip_by_playselect_nobinds;
    p.consolecommand("set input alt sci_forcedodge");       // level setup ends
    p.consolecommand("set input f1 tog_opermode 0");
    p.consolecommand("set input f7 tog_opermode 1");
@@ -1816,6 +1800,10 @@ exec function tog_show_debug(){
    if(mb_fail_confirm()) return;
    if(mode_oper==MO_LifetimeCfg || mode_oper==MO_prod) return;
    ena_debug = !ena_debug;
+}
+
+exec function ams_pause(){
+   ena_ams_render = !ena_ams_render;
 }
 
 exec function tog_show_all_layers(){
@@ -2181,8 +2169,8 @@ defaultproperties{
   bDisableLRmouseNotify=false
   bEnableMmouseNotify=false
   bUseUntrigger=false
-  b_SPAWNFLOODWARN_AutoDPNafterSummon=false
-  b_MY_USERINI_READONLY_AutoBindKeys=false
+  b_SPAWNFLOOD_WARN_AutoDPNafterSummon=false
+  b_MY_USERINI_IS_READONLY_AutoBindKeys=false
   ena_lockz=true
   ena_lockxy=true
   mode_dpn_fall=DPZ_floor
@@ -2247,6 +2235,7 @@ defaultproperties{
   region_sizetex(6)=128;
   region_sizetex(7)=128;
   order_welcome_msgs=0
+  ena_ams_render=true
 }
 
 // // ================================================================
