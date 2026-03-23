@@ -1,6 +1,9 @@
 class AreaMapScan extends weapon config(scitools);
 // todo check all keys avail vs opermode.
 // todo nogui mode (disable drawportal, hotkeys and something for 1024, 1280, 1366 screens)
+// todo zset dpn with visualize
+// todo reset nlayer after diag, 20/1 possible
+// todo mark dpn-replaced level via group
 #exec texture import file="textures\scipixel.png"    name="scipixel"    package="scitools" mips=1 flags=0 btc=-2
 #exec texture import file="textures\scipixel_g.png"  name="scipixel_g"  package="scitools" mips=1 flags=0 btc=-2
 #exec texture import file="textures\scipixel_o.png"  name="scipixel_o"  package="scitools" mips=1 flags=0 btc=-2
@@ -19,7 +22,8 @@ var HUD oldHUD;                      // used for menu-related hud setup transfer
 var class<HUD> oldHUDType;
 var byte n_layerz,done_layerz;       // selected/shot to png layers
 var bool ena_next_dpn_zset;          // if true, next spawned DPN will act as Zset leader. if found any, diag_z only iterate them
-var globalconfig float VertDiscretization; // AreaZ responsive map sensitivity
+var globalconfig float VertDiscretization; // AreaZ-in sensitivity (at scantime on AMS)
+var globalconfig float LayerSensitivity;   // AreaZ-out sensitivity (at drawtime on client inv)
 var globalconfig float AutofallFloordist;
 var /* globalconfig */ byte SHR_Factor_prodmap; // mb make this saveable
 var globalconfig bool bDisableAllBtnsNotify; // prio over 2 others
@@ -45,7 +49,7 @@ var byte alignz_seek;                // mem write pointer
 var byte n_region;
 var enum EOper    { MO_Scan,     MO_Diag,     MO_Mark,   MO_Prod,   MO_WantDiag,    MO_LifetimeCfg } mode_oper;
 var enum EMWAct   { MW_modX,     MW_modY,     MW_modL }                                              mode_mwheel;
-var enum ELTCfg   { LTC_Floordist,            LTC_ZSetDiscr,  LTC_ProdSHR }                          mode_ltcfg;
+var enum ELTCfg   { LTC_Floordist,            LTC_ZSetDiscr,  LTC_LaySens,    LTC_ProdSHR }          mode_ltcfg;
 var enum ERayPrc  { RP_SelFull,  RP_AllFast,  RP_AllFullEco,  RP_ClientLike,  RP_ClientFull }        mode_rayprocess;
 var enum EDPNFall { DPZ_floor,   DPZ_flying,  DPZ_user,       DPZ_laser }                            mode_dpn_fall;
 var enum EConf    { MC_Reset,    MC_Doit,     MC_Yesimsure,   MC_Stopfuckingasking,   MC_Confirmed } mode_confirm;
@@ -254,6 +258,11 @@ exec function ams(string name_var, string content_var){  switch(name_var){
       if(accept_var_tmp_int<=80) break;
       if(accept_var_tmp_int>384) accept_var_tmp_int = 384;
       VertDiscretization = accept_var_tmp_int;                         break;
+   case "ls":
+      setPropertyText("accept_var_tmp_int",content_var);
+      if(accept_var_tmp_int<=40) break;
+      if(accept_var_tmp_int>160) accept_var_tmp_int = 160;
+      LayerSensitivity = accept_var_tmp_int;                           break;
    case "shr":
       setPropertyText("accept_var_tmp_int",content_var);
       if(accept_var_tmp_int<=0) break;
@@ -400,6 +409,11 @@ exec function prod(){
    if(mode_oper==MO_LifetimeCfg || ena_debug) return;
    reg_unused = alignz_seek==0;
 //   k = 0;
+      log(" ====================================",'AMS');
+      log(" ==  EXEC THIS IN SCREENSHOTS DIR  ==",'AMS');
+      log(" ====================================",'AMS');
+      log(" dir /od /tc /b /a-d > amsr_"$common_texname$".bat",'AMS');
+      log(" ",'AMS');
    new_clientmsg[0] = "Writing amd_"$common_texname$".uc data into log...";
    clientmsg_timer = 1.7;
       log(" =====================================================",'AMS');
@@ -424,7 +438,7 @@ exec function prod(){
       log(" ",'AMS');
       log(" defaultproperties{",'AMS');
       log("   SHR_factor="$SHR_Factor_prodmap,'AMS');
-      log("   FloorHeight="$VertDiscretization,'AMS');
+      log("   FloorHeight="$LayerSensitivity,'AMS');
    for(i=0; i<=i_max; i++){
       if(!reg_unused && region_usedby[i]==9) continue;
       tmp_s = ""; if(i<10) tmp_s $= "0"; tmp_s $= string(i);
@@ -459,15 +473,6 @@ exec function prod(){
    ena_prod = true;
    done_layerz = 0;
    scrshot_timer = 2.0;
-}
-
-function CheckVersion()
-{
-    local int VersionInt;
-
-    // Convert the string version to an integer for easy comparison
-    VersionInt = int(Level.EngineVersion);
-
 }
 
 exec function q(){
@@ -571,7 +576,8 @@ exec function q(){
    p.clientmessage(c_key$"Enter"$c_str$" (in prod mode) - begin export process. After done, AMS will return to build mode.");
    p.clientmessage(" ");
    p.clientmessage("              Config variables (scitools.ini):");
-   p.clientmessage(c_var$"VertDiscretization"$c_str$" - AreaZ sensitivity, the height of zone where actual map layer shows certain texture.");
+   p.clientmessage(c_var$"VertDiscretization"$c_str$" aka IN AreaZ sensitivity - height of zone counted as corresponding map layer. Less layers means less textures and thus smaller file. Optimal: 128.");
+   p.clientmessage(c_var$"LayerSensitivity"$c_str$" aka OUT AreaZ sensitivity - height of zone where actual map layer shows certain texture. More layers means more z-responsive map. Optimal: 64.");
    p.clientmessage(c_var$"AutofallFloordist"$c_str$" - height of most DPNs relative to floor;");
    p.clientmessage(" classic unreal dist is 61uu, narrow floor - 24, narrower - 12");
    p.clientmessage(" narrower may cause some artifacts and excessive lines on stairsteps due to");
@@ -623,6 +629,7 @@ exec function q(){
    p.clientmessage(c_ucon$"ams "$c_str$"<cfgvar> - configure certain var, alias of "$c_ucon$"set"$c_str$" console command; cfg vars are:");
    p.clientmessage("fd - "$c_var$"AutofallFloordist");
    p.clientmessage("zd - "$c_var$"VertDiscretization");
+   p.clientmessage("ls - "$c_var$"LayerSensitivity");
    p.clientmessage("shr - "$c_var$"SHR_Factor_prodmap");
    p.clientmessage("name - "$c_var$"common_texname"$c_str$" (it isn't "$c_cmd$"globalconfig"$c_str$", used for configuring export textures name template)");
    p.clientmessage("Example: "$c_ucon$"ams shr 4"$c_str$" - set "$c_var$"SHR_Factor_prodmap"$c_str$" to 16.");
@@ -980,9 +987,9 @@ function postrender(canvas c){
    foreach allactors(class'pathnoderuntime',pn){
       pn_tot++;
 //----- layers ignorator ---------------------------------------
-      pnz = pn.location.z % VertDiscretization;  // eliminate z deviations to vert resolution
+      pnz = pn.location.z % LayerSensitivity; //VertDiscretization;  // eliminate z deviations to vert resolution
       pnz = pn.location.z - pnz;
-      nomatch_z = (abs(sel_z - pnz) > VertDiscretization);   // was 16/64 = +25% overlapping of discretized area
+      nomatch_z = (abs(sel_z - pnz) > LayerSensitivity);   // now separate var, was compared to VertDiscr
       // todo why this behave other than diagz layers? respect vert_discr; rename it to floorheight
       if(mode_rayprocess==RP_SelFull && nomatch_z) continue; // we maybe still process further in fullcolor map mode
       if(!nomatch_z) pn_mz++;
@@ -1496,12 +1503,13 @@ function postrender(canvas c){
    nframe = (int(level.timeseconds/2.5) % 2);
    pc_tmp = (nframe==0) ? pc_blue : pc_yellow;
    if(mode_oper!=MO_LifetimeCfg) pc_tmp = pc_brown;
-   upy = draw_key_action(c, pc_tmp, kw_none, "", "Map lifetime", upx, upy);
-   upy = draw_key_action(c, pc_tmp, kw_none, "", "  behavior", upx, upy);
+   upy = draw_key_action(c, pc_tmp, kw_none, "", "Map lft bhvr", upx, upy);
    pc_tmp = mode_oper==MO_LifetimeCfg ? pc_orange : pc_gray;     draw_lifetime_sel(c,LTC_Floordist,upx,upy);
    upy = draw_key_action(c, pc_tmp, kw_none, "", "FlrDist: "$int(AutofallFloordist), upx, upy);
    pc_tmp = mode_oper==MO_LifetimeCfg ? pc_red    : pc_gray;     draw_lifetime_sel(c,LTC_ZSetDiscr,upx,upy);
    upy = draw_key_action(c, pc_tmp, kw_none, "", "ZDiscr: "$int(VertDiscretization), upx, upy);
+   pc_tmp = mode_oper==MO_LifetimeCfg ? pc_pink   : pc_gray;     draw_lifetime_sel(c,LTC_LaySens,upx,upy);
+   upy = draw_key_action(c, pc_tmp, kw_none, "", "LaySens: "$int(LayerSensitivity), upx, upy);
    pc_tmp = mode_oper==MO_LifetimeCfg ? pc_green  : pc_gray;     draw_lifetime_sel(c,LTC_ProdSHR,upx,upy);
    upy = draw_key_action(c, pc_tmp, kw_none, "", "PrSHR: "$int(2**SHR_Factor_prodmap), upx, upy);
    upy = draw_key_action(c, pc_brown, kw_f6, "<F6>", mode_oper==MO_LifetimeCfg ? "done" : "edit", upx, upy);
@@ -1615,7 +1623,7 @@ function postbeginplay(){
       t.group='';
       t.bTriggerOnceOnly = false;               // force enable
          t.TriggerType = TT_ClassProximity;     // prohibit autotrigger
-         t.ClassProximityType = class'scihud';
+         t.ClassProximityType = class'STHUD';
       t.RepeatTriggerTime = 0.0;                // normalize toggling stuff
       t.RetriggerDelay = 0.2;
       t.GotoState('NormalTrigger');
@@ -1672,8 +1680,8 @@ function playselect(){
    if(p == none) return;
    oldHUD = p.myHUD;
    oldHUDType = p.HUDType;
-   p.HUDType = Class'scihud';
-   p.myHUD = Spawn(Class'scihud',p,,vect(32767,32767,32767));
+   p.HUDType = Class'STHUD';
+   p.myHUD = Spawn(Class'STHUD',p,,vect(32767,32767,32767));
    p.myHUD.MainMenu = oldHUD.MainMenu;
    p.myHUD.MainMenuType = oldHUD.MainMenuType;
    ena_show_name = true;
@@ -2050,11 +2058,13 @@ function bool do_scr_common(byte ijkl_key){ // used in MO_LifetimeCfg mode only
    skip_to_lifetimecfg_controls: switch(ijkl_key){
       case 0: switch(mode_ltcfg){  // up key, inc mode
          case LTC_ZSetDiscr: mode_ltcfg=LTC_Floordist; break;
-         case LTC_ProdSHR:   mode_ltcfg=LTC_ZSetDiscr; break; }
+         case LTC_LaySens:   mode_ltcfg=LTC_ZSetDiscr; break;
+         case LTC_ProdSHR:   mode_ltcfg=LTC_LaySens; break; }
       break;
       case 2: switch(mode_ltcfg){  // dn key, dec mode
          case LTC_Floordist: mode_ltcfg=LTC_ZSetDiscr; break;
-         case LTC_ZSetDiscr: mode_ltcfg=LTC_ProdSHR;   break; }
+         case LTC_ZSetDiscr: mode_ltcfg=LTC_LaySens;   break;
+         case LTC_LaySens:   mode_ltcfg=LTC_ProdSHR;   break; }
       break;
    } switch(mode_ltcfg){           // alter keys, exec anyway                 
     case LTC_Floordist:
@@ -2065,6 +2075,9 @@ function bool do_scr_common(byte ijkl_key){ // used in MO_LifetimeCfg mode only
     case LTC_ZSetDiscr:
        if(ijkl_key==3){ VertDiscretization+=16; if(VertDiscretization>256) VertDiscretization=256; }
        if(ijkl_key==1){ VertDiscretization-=16; if(VertDiscretization<80)  VertDiscretization=80;  }   break;
+    case LTC_LaySens:
+       if(ijkl_key==3){ LayerSensitivity+=8;    if(LayerSensitivity>160)   LayerSensitivity=160; }
+       if(ijkl_key==1){ LayerSensitivity-=8;    if(LayerSensitivity<40)    LayerSensitivity=40;  }     break;
     case LTC_ProdSHR:  
        if(ijkl_key==3){ SHR_Factor_prodmap++; if(SHR_Factor_prodmap>SHR_Factor_max) SHR_Factor_prodmap=SHR_Factor_max; }
        if(ijkl_key==1){ SHR_Factor_prodmap--; if(SHR_Factor_prodmap<1) SHR_Factor_prodmap=1; }         break;
@@ -2164,6 +2177,7 @@ defaultproperties{
   global_offset_x=0
   global_offset_y=0
   VertDiscretization=128.0
+  LayerSensitivity=64.0
   AutofallFloordist=24.0
   bDisableAllBtnsNotify=true
   bDisableLRmouseNotify=false
