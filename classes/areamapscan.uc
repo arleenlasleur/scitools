@@ -580,8 +580,7 @@ exec function q(){
    p.clientmessage(c_var$"LayerSensitivity"$c_str$" aka OUT AreaZ sensitivity - height of zone where actual map layer shows certain texture. More layers means more z-responsive map. Optimal: 64.");
    p.clientmessage(c_var$"AutofallFloordist"$c_str$" - height of most DPNs relative to floor;");
    p.clientmessage(" classic unreal dist is 61uu, narrow floor - 24, narrower - 12");
-   p.clientmessage(" narrower may cause some artifacts and excessive lines on stairsteps due to");
-   p.clientmessage(" their typical 16uu height.");
+   p.clientmessage(" narrower may cause some artifacts and excessive lines on stairsteps due to their typical 16uu height.");
    p.clientmessage(c_var$"bDisableAllBtnsNotify"$c_str$" - do not rogerblink pressed key name in the interface.");
    p.clientmessage(c_var$"bDisableLRmouseNotify"$c_str$" - do not blink for left/right mouse buttons, even if other keys still enabled.");
    p.clientmessage(c_var$"bEnableMmouseNotify"$c_str$" - blink for mid mouse button as well.");
@@ -592,7 +591,7 @@ exec function q(){
    p.clientmessage("              Regions and prepare to prod:");
    p.clientmessage(c_key$"1-8"$c_str$", incl numpad keys - select/toggle region.");
    p.clientmessage(c_key$"M"$c_str$" - mark region. Map align on X;Y axis, texture size, spatial zoom of region will be overwritten.");
-   p.clientmessage(c_key$"Enter"$c_str$" (in markup mode) - fill current layer number (aka diag result Z from set) to current region. Keep X;Y offset unchanged for correct map working in this area. Already existing Z in current region, if matched, will be removed if "$c_key$"Enter"$c_str$" pressed twice; this is how region layer toggle working. For region occupy navigation, no additional keys implemented, due to lots of keys used already.");
+   p.clientmessage(c_key$"Enter"$c_str$" (in markup mode) - fill current layer number (aka diag result Z from set) to current region. Keep X;Y offset unchanged for correct map working in this area. Already existing Z in current region, if matched, will be removed if "$c_key$"Enter"$c_str$" pressed twice; this is how region layer toggle working. For region occupy navigation, no additional keys implemented yet (maybe later).");
    p.clientmessage(" ");
    p.clientmessage("              Render:");
    p.clientmessage(c_key$"F2"$c_str$" - toggle render mode");
@@ -653,13 +652,11 @@ exec function q(){
    p.clientmessage("              Export considerations");
    p.clientmessage(" ");
    p.clientmessage("It is strongly recommended to do not change default vertical resolution from 128 UU, however, this is supported by AreaMapData prototype actor. I currently don't plan implementing of autostretching it for complex levels, so you will need to do it manually, and maybe rebuild scitools package. Further, maybe FFT for ZSet recognition will be added.");
-   p.clientmessage("Keep an eye on movers, they ideally must stay still while screenshots made. Keep all openable doors already-open, due to");
-   p.clientmessage("solid lines on them, or it will look like noclip cheat when player crosswalk them.");
+   p.clientmessage("Keep an eye on movers, they ideally must stay still while screenshots made. Keep all openable doors already-open, due to solid lines on them, or it will look like noclip cheat when player crosswalk them.");
    p.clientmessage(" ");
    p.clientmessage("              Greetz:");
    p.clientmessage(" Omega, MetallicaFan212, Fumbles McStupid, all people who helped me and who I forgot to mention.");
-   return;
-   p.clientmessage("Control map snapping to player (horz and/or vert) and DPN spawning mode. Player snap/follow turned on by default.");
+   p.clientmessage(" ");
 }
 // ==================================================================================================================
 function tick(float f){
