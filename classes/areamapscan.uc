@@ -145,7 +145,7 @@ const y_about = 10; const x_about = 10; // about label                 /* col te
 const y_hdr_oper = 463;     const x_hdr_oper = 42;     /* xpos 2  */  const x_col_map_ctl = 250;
 const y_hdr_map_ctl = 463;  const x_hdr_map_ctl = 282; /* xpos 16 */  const x_col_lvl_ctl = 458;
 const y_hdr_lvl_ctl = 463;  const x_hdr_lvl_ctl = 506; /* xpos 31 */  const x_col_user = 10;
-const y_hdr_user = 637;     const x_hdr_user = 58;     /* xpos 3  */  const x_col2_user = 250;
+const y_hdr_user = 666;     const x_hdr_user = 58;     /* xpos 3  */  const x_col2_user = 250;
 const y_hdr_region = 637;   const x_hdr_region = 490;  /* xpos 30 */  const x_col_region = 458;
 const y_hdr_place = 812;    const x_hdr_place = 74;    /* xpos 4  */  const x_col_place = 10;
 const y_hdr_mouse = 812;    const x_hdr_mouse = 490;   /* xpos 30 */  const x_col_mouse = 458;
@@ -170,7 +170,7 @@ exec function tog_opermode(byte sw_to_oper){
      SHR_Factor_scanmap=SHR_Factor_default;    upd_resolution();  ena_lockz=true;   ena_lockxy=true;
      mode_rayprocess = RP_ClientLike;
                                                                                                          break;
-   case 1: last_kw=kw_f7;    mode_oper=MO_WantDiag;     n_region=9;
+   case 1: last_kw=kw_f7;    mode_oper=MO_WantDiag;     n_region=9;     mode_confirm = MC_Reset;
 
 
                                                                                                          break;
@@ -304,6 +304,10 @@ function bool mb_fail_confirm(){  // called from all kbd functions
 function do_fail_confirm(){
    mode_confirm = MC_Reset;         // reset confirm progress if any wrong key
    mode_oper = MO_Scan;
+/*   n_region=9; mode_rayprocess = RP_ClientLike;
+   ena_2xzoom=true; ena_4xzoom=false;
+   ena_lockz=true;  ena_lockxy=true;
+   SHR_Factor_scanmap=SHR_Factor_default; upd_resolution(); */
    new_clientmsg[0] = "AreaZ[] set diag sequence";
    new_clientmsg[1] = "has been cancelled.";
    clientmsg_timer = 2.5;
@@ -595,6 +599,7 @@ exec function q(){
    p.clientmessage(" ");
    p.clientmessage("              Render:");
    p.clientmessage(c_key$"F2"$c_str$" - toggle render mode");
+   p.clientmessage(c_key$"F10"$c_str$" - toggle pause mode (disable all processing + hide gui)");
    p.clientmessage(c_key$"Leftmouse hold"$c_str$" - preview full quality in player area or layer matching by Z.");
    p.clientmessage("You can switch map render mode to fast/full quality, specific layer (used at export stage), or intellifast mode which is on by default (used while DPN placement as max balance-friendly). Most demanded scale is typically 1:16, because map should be big enough to navigate rooms and small enough for better level coverage. One 1024 texture with 1bpp color will take ~10 kb, so total level may stay around 0.4-1.2 mb. Multiple AreaMapData actors can work transparently, but you will need specialized iterator to render them.");
    p.clientmessage(" ");
@@ -1206,6 +1211,7 @@ function postrender(canvas c){
    upy = draw_key_action(c, pc_tmp, kw_f4, "<F4>", "markup", upx, upy);
    pc_tmp = mode_oper==MO_Prod ? pc_green : pc_green_f;
    upy = draw_key_action(c, pc_tmp, kw_f8, "<F8>", "prod",   upx, upy);
+   upy = draw_key_action(c, pc_red_f, kw_none, "<F10>", "pause", upx, upy);
    // -------------------
    if(mode_oper==MO_LifetimeCfg) goto skip_by_drawkeys_lifetimecfg;
    upx = x_hdr_map_ctl; upy = y_hdr_map_ctl;
@@ -1693,7 +1699,8 @@ function playselect(){
    p.consolecommand("set input f1 tog_opermode 0");
    p.consolecommand("set input f7 tog_opermode 1");
    p.consolecommand("set input f4 tog_opermode 2");
-   p.consolecommand("set input f8 tog_opermode 3");     // opermode ends
+   p.consolecommand("set input f8 tog_opermode 3");
+   p.consolecommand("set input f10 ams_pause");            // opermode ends
    p.consolecommand("set input z tog_digzoom");
    p.consolecommand("set input x tog_shr_factor");
    p.consolecommand("set input b tog_mode_step");
@@ -1987,6 +1994,7 @@ function do_diag_z(bool bScriptedCall){
       new_clientmsg[1] = "return to mark mode.";
       clientmsg_timer = 4.0;
    }
+   n_layerz = 0;
    tog_opermode(2);
 }
 
