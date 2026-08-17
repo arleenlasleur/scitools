@@ -10,6 +10,7 @@ if(isset($argv[1]) && $argv[1]=="/?"){
    echo "5. Remove any CSS coords transform/translate.".PHP_EOL;
    echo "Building scale: 1 m = 100 cm = 45.25 UU".PHP_EOL;
    echo "QGIS meas key: Ctrl+Shft+M".PHP_EOL;
+   echo "upd try: hwall=160, hpawn=104-106, 1m=60uu, CH=53,CR=20, 106-100 deg fov".PHP_EOL;
    exit(0);
 }
 if(!isset($argv[2])){
