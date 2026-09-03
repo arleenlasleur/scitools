@@ -147,7 +147,7 @@ const y_hdr_map_ctl = 463;  const x_hdr_map_ctl = 282; /* xpos 16 */  const x_co
 const y_hdr_lvl_ctl = 463;  const x_hdr_lvl_ctl = 506; /* xpos 31 */  const x_col_user = 10;
 const y_hdr_user = 666;     const x_hdr_user = 58;     /* xpos 3  */  const x_col2_user = 250;
 const y_hdr_region = 637;   const x_hdr_region = 490;  /* xpos 30 */  const x_col_region = 458;
-const y_hdr_place = 812;    const x_hdr_place = 74;    /* xpos 4  */  const x_col_place = 10;
+const y_hdr_place = 827;    const x_hdr_place = 74;    /* xpos 4  */  const x_col_place = 10;
 const y_hdr_mouse = 812;    const x_hdr_mouse = 490;   /* xpos 30 */  const x_col_mouse = 458;
 const x_rcol = 1719; // right sidebar xpos 0; (3*pad_glob)+vieww+max_size_tex
 const y_rcol_texdata = 10;      //=pad_glob
@@ -515,9 +515,11 @@ exec function q(){
    p.clientmessage(c_var$"   b_MY_USERINI_IS_READONLY_AutoBindKeys=True");
    p.clientmessage("4. Save file, close it and relaunch unreal. You need R/O attribute set on user.ini file, or use another copy of it. To specify separate user.ini, use command: "$c_cmd$"unreal %1 userini=user_ams.ini "$c_str$" where %1 is name of .unr file.");
    p.clientmessage(" ");
-   p.clientmessage("AMS use PathNode runtime-placeable equivalent as epicenters of raytracing to construct hull/walls and solid collision. Due to collision reactivity with bCollideActors, most puckups and deco are auto-removed. You can clean excessive scan obstacles in PNG editor like GIMP, PS or mspaint. AMS also supports raytracing from bStatic normal PAthNodes, but this feature is transitional. I will debug it further.");
+   p.clientmessage("AMS use PathNode runtime-placeable equivalent as epicenters of raytracing to construct hull/walls and solid collision. Due to collision reactivity with bCollideActors, most puckups and deco are auto-removed. You can clean excessive scan obstacles in PNG editor like GIMP, PS or mspaint. AMS also supports raytracing from bStatic normal PathNodes, but this feature is transitional. I will debug it further.");
    p.clientmessage("Your task is to spawn PathNodeRuntime, or dummy pathnodes, DPN, on level - lots enough to do effective walls scan, though less enough to don't cause FPS freeze. Always remember, Unreal Virtual Machine works in single-thread manner on single core of CPU. Because of this, even if you have very powerful processor such as latest Ryzens, excessive raycasting will eat framerate. In build, or DPN placement mode, many measures were taken to minimize load. Laggy performance while max quality mode won't be long; after export is done, AMS will return to build mode.");
+   p.clientmessage(" ");
    p.clientmessage("General hint: place DPNs near walls at every walkable places.");
+   p.clientmessage(" ");
    p.clientmessage("This version almost got rid of scanning artifacts, but this may lead to some objects inconsistency. This behavior fixed by special mode of scanning actors when placing these, called strict walls/directional anywalls. Even hill/slope will count as \"wall\", so directional DPNs must have correct scan sector and rotation to minimize artifacts.");
    p.clientmessage(" ");
    p.clientmessage("              Navigation:");
@@ -1249,13 +1251,14 @@ function postrender(canvas c){
    c.setpos(upx,upy); c.drawtext("User:");
      upx = x_col_user; upy += (pad_fonh_half+fonh);
    pc_tmp = ena_lockz ? pc_yellow : pc_yellow_f;
-   upy = draw_key_action(c, pc_tmp,    kw_u,    "<U>",    "lock Z/L",  upx, upy);
+   upy = draw_key_action(c, pc_tmp, kw_u,    "<U>",    "lock Z/L",  upx, upy);
    pc_tmp = ena_lockxy ? pc_yellow : pc_yellow_f;
    upy = draw_key_action(c, pc_tmp, kw_o,    "<O>",    "lock XY", upx, upy);
    pc_tmp = !ena_lockxy ? pc_yellow : pc_yellow_f;
    upy = draw_key_action(c, pc_tmp, kw_ijkl, "<IJKL>", "offset",  upx, upy);
    if(ena_anywall)
-      upy = draw_key_action(c, pc_cyan, kw_none, "", "Sector: "$int(anywall_half_angle), upx, upy);
+         upy = draw_key_action(c, pc_cyan,   kw_h, "", "Sector: "$int(anywall_half_angle), upx, upy);
+    else upy = draw_key_action(c, pc_cyan_f, kw_h, "", "Sector: n/a", upx, upy);
    // -------------------
      upx = x_col2_user; upy = y_hdr_user+pad_fonh_half;
    pc_tmp = sens_ignore ? pc_yellow : pc_yellow_f;
@@ -1318,7 +1321,7 @@ function postrender(canvas c){
    upx = x_hdr_place; upy = y_hdr_place;
    c.drawcolor = pc_brown;
    c.setpos(upx,upy); c.drawtext("Placement: ");
-     upx = x_col_place; upy += pad_fonh_half+fonh;
+     upx = x_col_place; upy += fonh;
    if(mode_dpn_fall==DPZ_floor){  pc_tmp = pc_brown;  str_tmp = "floordist"; }
    if(mode_dpn_fall==DPZ_flying){ pc_tmp = pc_green;  str_tmp = "floating";  }
    if(mode_dpn_fall==DPZ_user){   pc_tmp = pc_yellow; str_tmp = "inherit user z"; }
@@ -1594,8 +1597,7 @@ exec function mapinit(){
    tog_opermode(0);
 }
 function postbeginplay(){
-   local string KeyName, Alias;
-
+// local string KeyName, Alias;
    local info ifo;
    local inventory w;
    local decoration d;
@@ -1857,6 +1859,7 @@ exec function tog_mode_mwheel(){
 
 exec function tog_strictwalls(){
    if(mode_oper==MO_LifetimeCfg || mode_oper==MO_prod || ena_debug) return;
+   key_when = 0.3; last_kw = kw_h;
    ena_anywall = !ena_anywall;
    if(ena_anywall) return;
    if(laser_sector_sta!=none) laser_sector_sta.setlocation(vect(32767,32767,32767));
@@ -2164,6 +2167,7 @@ exec function sci_user_dpn_spawn(){  // middlemouse
 }
 
 exec function new_layerz_manual(){
+   key_when = 0.3; last_kw = kw_n;
    ena_next_dpn_zset = !ena_next_dpn_zset;
 }
 

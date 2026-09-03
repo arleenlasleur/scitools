@@ -13,7 +13,6 @@ $inputFile  = $argv[1];
 $outputFile = $argv[2];
 $wallHeight  = 120.0;
 if(isset($argv[3])) $wallHeight = intval($argv[3]);
-
 if (!file_exists($inputFile)) die("File not found.".PHP_EOL);
 
 $xml = simplexml_load_file($inputFile);

@@ -17,7 +17,6 @@ if(!isset($argv[2])){
    echo "Call: svgsnap <in.svg> <out.svg>".PHP_EOL;
    exit(1);
 }
-if (!file_exists($inputFile)) die("File not found.".PHP_EOL);
 function AddInkscapeGrid(SimpleXMLElement $xml) {
    $sodipodiURI = 'http://sourceforge.net';
    $inkscapeURI = 'http://inkscape.org';
@@ -50,6 +49,7 @@ function AddInkscapeGrid(SimpleXMLElement $xml) {
 $inputFile  = $argv[1];
 $outputFile = $argv[2];
 $grid       = 2;
+if (!file_exists($inputFile)) die("File not found.".PHP_EOL);
 $xml = simplexml_load_file($inputFile);
 $xml->registerXPathNamespace('svg', 'http://w3.org');
 $paths = $xml->xpath('//svg:path | //path'); // iterate all path
