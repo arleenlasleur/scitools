@@ -4,15 +4,16 @@ class AreaMapScan extends weapon config(scitools);
 // todo zset dpn with visualize
 // todo reset nlayer after diag, 20/1 possible
 // todo mark dpn-replaced level via group
-#exec texture import file="textures\scipixel.png"    name="scipixel"    package="scitools" mips=1 flags=0 btc=-2
-#exec texture import file="textures\scipixel_g.png"  name="scipixel_g"  package="scitools" mips=1 flags=0 btc=-2
-#exec texture import file="textures\scipixel_o.png"  name="scipixel_o"  package="scitools" mips=1 flags=0 btc=-2
-#exec texture import file="textures\scipixel_p.png"  name="scipixel_p"  package="scitools" mips=1 flags=0 btc=-2
-#exec texture import file="textures\scipixelblk.png" name="scipixelblk" package="scitools" mips=1 flags=0 btc=-2
-#exec texture import file="textures\scinoblk.png"    name="scinoblk"    package="scitools" mips=1 flags=0 btc=-2
-#exec texture import file="textures\sciscreenbg.png" name="sciscreenbg" package="scitools" mips=1 flags=0 btc=-2
-#exec font    import file="textures\scifontbig.pcx"  name="scifontbig"  // 16x29
-#exec texture import file="textures\scibearing.png"  name="scibearing"  package="scitools" mips=1 flags=2 btc=-2
+#exec texture import file="textures\scipixel.png"     name="scipixel"     package="scitools" mips=1 flags=0 btc=-2
+#exec texture import file="textures\scipixel_g.png"   name="scipixel_g"   package="scitools" mips=1 flags=0 btc=-2
+#exec texture import file="textures\scipixel_o.png"   name="scipixel_o"   package="scitools" mips=1 flags=0 btc=-2
+#exec texture import file="textures\scipixel_p.png"   name="scipixel_p"   package="scitools" mips=1 flags=0 btc=-2
+#exec texture import file="textures\scipixelblk.png"  name="scipixelblk"  package="scitools" mips=1 flags=0 btc=-2
+#exec texture import file="textures\scinoblk.png"     name="scinoblk"     package="scitools" mips=1 flags=0 btc=-2
+#exec texture import file="textures\sciscreenbg.png"  name="sciscreenbg"  package="scitools" mips=1 flags=0 btc=-2
+#exec font    import file="textures\scifontbig.pcx"   name="scifontbig"   // 16x29
+#exec texture import file="textures\scifontmatch.png" name="scifontmatch" package="scitools" mips=1 flags=2 btc=-2
+#exec texture import file="textures\scibearing.png"   name="scibearing"   package="scitools" mips=1 flags=2 btc=-2
 
 var int accept_var_tmp_int;          // for setpropertytext()
 var bool ena_show_name;              // show common_texname instead of sysrq
@@ -137,7 +138,8 @@ var EKeyWhere  last_kw;
 // ============================================================================================================
 const pad_glob = 10; // <-- padding;  dimensions,       texdata             viewport
 const pad_view = 12;            const fonw = 16;  const fillw = 23;  const vieww = 665;
-const pad_fonh_half = 15;       const fonh = 29;  const fillh = 23;  const viewh = 375;    
+const pad_fonh_half = 15;       const fonh = 29;  const fillh = 23;  const viewh = 375;
+const fmpos_sq = 1; const fmpos_up = 18; /* once char+border*/ const fmpos_dn = 35; // twice
 const x_vp = 10; // viewport x; pad_glob       here and further, x_::: - static coord
 const y_vp = 78; // viewport y; (2*pad_glob)+(2*fonh)           :::_x - dynamic
 const y_about = 10; const x_about = 10; // about label                 /* col text, xpos-2 */
@@ -1456,7 +1458,8 @@ function postrender(canvas c){
    }
    // -------------------
    upx = x_rcol; upy = y_rcol_player-58;
-         draw_key_action(c, pc_tmp, kw_none, "", "Set:    @", upx, upy);
+         draw_key_action(c, pc_tmp, kw_none, "", "Set:", upx, upy);
+         draw_key_action(c, pc_tmp, kw_none, "", "@", upx+(7*fonw)+8, upy);
    str_tmp = "";
    if(n_layerz<10) str_tmp $= " ";
     str_tmp $= string(n_layerz);
@@ -1466,7 +1469,25 @@ function postrender(canvas c){
    str_tmp = "X";
    if(n_region>=0 && n_region<=7) str_tmp = string(n_region+1);
    pc_tmp = color_region(n_region,mode_oper!=MO_Mark);
-   upy = draw_key_action(c, pc_tmp, kw_none, "", str_tmp, upx+(10*fonw), upy);
+         draw_key_action(c, pc_tmp, kw_none, "", str_tmp, upx+(9*fonw), upy);
+
+   if(!ena_lockz){     // alignz_fill bksp indicator - need go up/dn or now matching
+      pc_tmp = pc_wh;
+      nframe = n_region;
+      if(nframe>7) nframe=0;
+      k = alignz_seek;
+      if(alignz_seek > 0) k -= 1;
+      if(region_usedby[k] != n_region) pc_tmp = pc_bluer_f;
+      c.Style = ERenderStyle.STY_Masked;
+      c.setpos(upx+(fonw*10)+2,upy-3);
+      c.drawcolor = pc_tmp;
+      if(region_usefloor[k] <  n_layerz){ c.drawtile(texture'scifontmatch',fonw,fonh,fmpos_dn,1,fonw,fonh); goto done_alignz_bksp; }
+      if(region_usefloor[k] == n_layerz){ c.drawtile(texture'scifontmatch',fonw,fonh,fmpos_sq,1,fonw,fonh); goto done_alignz_bksp; }
+      if(region_usefloor[k] >  n_layerz){ c.drawtile(texture'scifontmatch',fonw,fonh,fmpos_up,1,fonw,fonh); goto done_alignz_bksp; }
+      done_alignz_bksp:
+      c.drawcolor = pc_wh;
+      c.Style = ERenderStyle.STY_Normal;
+   }
    // -------------------
    upx = x_rcol; upy = y_rcol_player-15;
    str_tmp = "   Player";
@@ -1484,7 +1505,7 @@ function postrender(canvas c){
    upy = draw_key_action(c, pc_wh, kw_none, "", str_tmp, upx, upy);
    str_tmp = ena_lockz ? "lock" : n_layerz$"/"$presets_nmax;
    pc_tmp = ena_lockz ? pc_green : pc_teal;
-   upy = draw_key_action(c, pc_tmp, kw_none, "Sel:", str_tmp, upx, upy);
+         draw_key_action(c, pc_tmp, kw_none, "L:", str_tmp, upx, upy);
    // -------------------
    upx = x_rcol; upy = y_rcol_align-15-29;
    upy = draw_key_action(c, pc_blue, kw_none, "", "   Align", upx, upy);
