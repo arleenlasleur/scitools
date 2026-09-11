@@ -651,6 +651,7 @@ exec function q(){
    p.clientmessage("2. Switch to diag mode and approve it. This action is already performed during map init, but another analysis may be necessary (typically if DPNs spawned on never-used by bStatic PNs heights).");
    p.clientmessage("3. Switch to markup mode to define regions. You can use less than 8 regions. You can leave some of them activated (they never shows in prod mode).");
    p.clientmessage("4. Assign AlignZ fill array if you plan to use region(s). Otherwise, simply adjust X;Y ofset to fit level in texture.");
+   p.clientmessage("   AlignZ fill data can be altered at any time, but only stack-editable. This means you need pop last value if you want push in current place another value. Next to LAR indicator you can see white backspace marker if current area match array data. If it shows up or down icon, current selected layer must be adjusted. If it shows square cursor, next "$c_key$"Enter"$c_str$" press will pop value, acting as backspace. This indicator grayed upon region mismatch.");
    p.clientmessage("5. Switch to prod mode and press Enter to start.");
    p.clientmessage("At any stage of production, savegame may be used to keep setings/work.");
    p.clientmessage("7. Close unreal and open "$c_cmd$"unreal.log");
