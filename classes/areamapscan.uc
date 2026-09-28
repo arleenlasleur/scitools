@@ -55,6 +55,14 @@ var enum ERayPrc  { RP_SelFull,  RP_AllFast,  RP_AllFullEco,  RP_ClientLike,  RP
 var enum EDPNFall { DPZ_floor,   DPZ_flying,  DPZ_user,       DPZ_laser }                            mode_dpn_fall;
 var enum EConf    { MC_Reset,    MC_Doit,     MC_Yesimsure,   MC_Stopfuckingasking,   MC_Confirmed } mode_confirm;
 var bool ena_debug;                  // show regions debug data
+var bool ena_dpntest;                // show untouched dpns in red color
+const dtdir_w = 1;
+const dtdir_a = 2;
+const dtdir_s = 4;
+const dtdir_d = 8;
+const dtdir_u = 16;
+const dtdir_c = 32;
+var int dpntest_dir;                 // navigable dir to reach cosest untested dpn
 var bool ena_lockz;                  // snap selz to playerz (vert coord lock)
 var bool ena_lockxy;                 // snap map center to player (horz coords lock)
 var bool ena_2xzoom;                 // half tex resolution (digital zoom)
@@ -92,6 +100,7 @@ var bool ena_prod;                   // execute prod sequence if true
 var byte order_welcome_msgs;
 var float welcome_msgs_timer;
 var bool ena_ams_render;             // global disable, to preview fullscr level
+var int pn_tot,pn_mz, rc_tot;        // pathnode total qty, matchz qty, rays cast total
 // ============================================================================================================
 // CALIBRATION DATA. Added to eliminate magicnumbers from code.
 // ============================================================================================================
@@ -103,6 +112,8 @@ const anti_artifacts_maxslope = 5300; // don't ignore raypoint if hitnormal pitc
 const advance_ray_pos_full = 512;     // speed of rotator for raycast cycle, precise mode
 const advance_ray_pos_std = 1024;     // normal mode
 const advance_ray_pos_fast = 8192;    // economode
+//const advance_ray_pos_shit = 21847;   // max performance
+const advance_ray_pos_shit = 12288;   // max performance
 const timetrigger_pw_sens_fire=0.45;  // how long hold fire to preview full render mode
 const max_fastscan_vsizesq = 2400000; // ignore dist>1536 pathnodes when in rmodes 1,3
 const dpn_addz_narrow = 24;   // height of scanned wall perimeter, 50 cm
@@ -118,6 +129,16 @@ const hardcode_scrh = 1080;
 const kill_dpn_radius_by_laser  = 12.0;
 const kill_dpn_radius_by_player = 32.0;
 // ============================================================================================================
+const MIN_DIST      = 96.0;
+const MAX_WALL_DIST = 768; // was 512.0;
+const PREF_DIST     = 384.0;
+const MAX_CHILDREN  = 3;
+const MAX_TOTAL     = 4500;
+const NUM_RAYS      = 12; //16;      // шаг 22.5; при желании 24/32
+const CHILD_BACKOFF = 128.0;   // отступ ребёнка от стены (в углах)
+var int SpawnedTotal;
+var int SkippedOpen;
+// ============================================================================================================
 var color           // UI color, set in postbeginplay()
    pc_blue,    pc_blue_f,    pc_orange,  pc_orange_f,  pc_brown,    pc_blue_map,
    pc_bluer,   pc_bluer_f,   pc_green,   pc_green_f,   pc_brown_f,  pc_bluer_map,
@@ -129,7 +150,7 @@ enum EKeyWhere{      // UI key event for anim
    kw_f2, kw_2, kw_8, kw_o, kw_t, kw_v,
    kw_f7, kw_3, kw_z, kw_y, kw_h, kw_m, kw_n,
    kw_f4, kw_4, kw_x, kw_q, kw_lmb, kw_mmb, kw_rmb,
-          kw_5, kw_b, kw_none, kw_ijkl, kw_pupd,
+   kw_f3, kw_5, kw_b, kw_none, kw_ijkl, kw_pupd,
    kw_f8, kw_6, kw_g, kw_ent, kw_p, kw_f6};
 var float      key_when;
 var EKeyWhere  last_kw;
@@ -159,13 +180,14 @@ const y_rcol_scope = 453;    /* 5 lines lower */  const y_clientmsg = 90;  //=(p
 const y_rcol_align = 569;    /* 4 lines lower */  const y_statusbar = 412; //=y_vp+viewh-pad_view-fonh
 const y_rcol_region = 714;   /* 4 lines lower */  const x_view_lpos = 22;  //=pad_glob+pad_view
 const y_rcol_lifetime = 830; /* 5 lines lower */  const x_view_rpos = 643; //=vieww-pad_glob+pad_view
-const y_rcol_noob = 1041;    //=hardcode_scrh-pad_glob-fonh   
+const y_rcol_noob = 1041;    //=hardcode_scrh-pad_glob-fonh
 // ============================================================================================================
 // USER OPERATION MODE SWITCHING
 // ============================================================================================================
 exec function tog_opermode(byte sw_to_oper){
 //   local byte i;
 // if(mode_oper == sw_to_oper) return;  // 2026-02-05: disabled, for mode reset to defaults
+   ena_dpntest = false;
    if(ena_debug) return;  if(mode_oper==MO_WantDiag){ mode_oper=MO_Scan; return; }
      key_when = 0.3;        switch(sw_to_oper){
    case 0: last_kw=kw_f1;    mode_oper=MO_Scan;         n_region=9;     ena_2xzoom=true;  ena_4xzoom=false;
@@ -238,6 +260,14 @@ exec function tog_layerz_assign(){ // also servicing prod process begin
    skip_by_prodmode_ent_action:
    prod();
 }
+exec function tog_dpntest(){
+   if(mode_oper==MO_Mark || mode_oper==MO_Prod){
+      ena_dpntest = false;
+      return;
+   }
+   key_when = 0.3; last_kw = kw_f3;
+   ena_dpntest = !ena_dpntest;
+}
 // ============================================================================================================
 // USER MACROS
 // ============================================================================================================
@@ -245,11 +275,18 @@ exec function init(){ playselect(); } // Used for recall hotkeys upon loadgame i
 exec function diag(){ do_diag_z(false); }  // Invoke diag proc without confo. Destroys all AlignZ selection data.
 // Old code `spawn(class'pnze');` makes rediag necessary, bc map pays attention to normal PathNode locations
 // only, not PathNodeRuntime as well. This was causing map gaps in AI-unkn spots in case of vert mismatch.
+exec function dpntest(){
+   local pathnoderuntime dpn;
+   foreach allactors(class'pathnoderuntime',dpn){
+      dpn.bIsKillGoal = true;
+      if(!dpn.bHiddenEd && (laserdpn!=none && dpn!=laserdpn)) dpn.texture=texture'sciRpnr';
+   }
+}
 exec function savecfg(){ saveconfig(); }  // scitools.ini mgmt
 exec function readcfg(){ resetconfig(); }
 exec function killzsets(){
-   local pathnoderuntime pn;
-   foreach allactors(class'pathnoderuntime',pn) if(pn.bHiddenEd) pn.destroy();
+   local pathnoderuntime zpn;
+   foreach allactors(class'pathnoderuntime',zpn) if(zpn.bHiddenEd) zpn.destroy();
 }
 exec function ams(string name_var, string content_var){  switch(name_var){
    case "fd":
@@ -670,11 +707,13 @@ exec function q(){
 }
 // ==================================================================================================================
 function tick(float f){
+   local vector V, Ax, Ay, Az;
+   local float dx, dy, dz;
    local vector hl,hn, x,y,z, spawn_where;
    local rotator r;
    local float lasermult, laserdist;
    local playerpawn p;
-   local pathnoderuntime pn;
+   local pathnoderuntime dpn;
    local pawn pt;
    if(owner == none) return;
    p = playerpawn(owner);
@@ -736,14 +775,36 @@ function tick(float f){
    if(mode_dpn_fall==DPZ_user)   spawn_where.z  = p.location.z;      // inherit user z
    if(mode_dpn_fall==DPZ_laser)  spawn_where.z  = z.z;               // inherit laserblast z
 // ----------------------
+   dpntest_dir = 0;
+   GetAxes(p.viewrotation, Ax, Ay, Az);
+   foreach allactors(class'pathnoderuntime',dpn){
+      if(laserdpn!=none && dpn==laserdpn) continue;
+      if(!dpn.bIsKillGoal) continue;
+      V  = dpn.location - p.location;
+      dx = V dot Ax;
+      dy = V dot Ay;
+      dz = V dot Az;
+      if (!(dpntest_dir & dtdir_w) && dx > 0) dpntest_dir = dpntest_dir | dtdir_w;
+      if (!(dpntest_dir & dtdir_s) && dx < 0) dpntest_dir = dpntest_dir | dtdir_s;
+      if (!(dpntest_dir & dtdir_d) && dy > 0) dpntest_dir = dpntest_dir | dtdir_d;
+      if (!(dpntest_dir & dtdir_a) && dy < 0) dpntest_dir = dpntest_dir | dtdir_a;
+      if (!(dpntest_dir & dtdir_u) && dz > 0) dpntest_dir = dpntest_dir | dtdir_u;
+      if (!(dpntest_dir & dtdir_c) && dz < 0) dpntest_dir = dpntest_dir | dtdir_c;
+      if (dpntest_dir == 63) break;
+   }
    if(laserdpn!=none){
       laserdpn.setlocation(spawn_where);
-      foreach radiusactors(class'pathnoderuntime',pn,kill_dpn_radius_by_laser,laserdpn.location){
-         if(pn==laserdpn) continue;
+      foreach radiusactors(class'pathnoderuntime',dpn,kill_dpn_radius_by_player,p.location){
+//    foreach radiusactors(class'pathnoderuntime',dpn,kill_dpn_radius_by_laser,laserdpn.location){
+         if(dpn==laserdpn) continue;
 //       pn.texture = texture'sciRpnr';  // red lased DPNs highlight (to show nowkill ones), 2026-02-10: disabled
                                          // requires more tick() code of DPNs to handle Zset mode correctly
                                          // also impacts performance, which is poor without this already
-         pn.enable('tick');
+//       dpn.enable('tick');  //2026-09-28: mbshit
+         if(dpn.bIsKillGoal){
+            dpn.bIsKillGoal = false;
+            dpn.texture=dpn.default.texture;
+         }
       }
       laserdpn.bHidden = mode_laser==0;
       laserdpn.bDirectional = ena_anywall;
@@ -930,23 +991,23 @@ function postrender(canvas c){
    local bool bool_tmp;
    local float resolution_error;
    local int region_area;
-   local actor rtarg;
-   local vector x,y,z,endtrace,hl,hn;
+// local actor rtarg;
+   local vector x,y,z, /*endtrace,*/ hl /*,hn*/ ;
    local string str_tmp;
-   local rotator r;
+//   local rotator r;
    local float rotr;  // radians rotation
    local byte nmarker;
-   local pathnoderuntime pn;
+//   local pathnoderuntime dpn;
    local int hlx,hly,mkx,mky;
    local int marked_error;
    local playerpawn p;
-   local int sel_z;
-   local int pn_tot,pn_mz, /*pn_rad,*/ rc_tot; // pathnode total qty, matchz qty, radius, rays cast total
+//   local int sel_z;
+// local int pn_tot,pn_mz, /*pn_rad,*/ rc_tot; // pathnode total qty, matchz qty, radius, rays cast total
    local int i,j,k;
    local byte nframe;
    local float pnz;
-   local bool nomatch_z; // this z does not match current sel_z or lock_z
-   local float yaw_until; // end of sector
+//   local bool nomatch_z; // this z does not match current sel_z or lock_z
+//   local float yaw_until; // end of sector
    p = playerpawn(owner);
    if(!ena_ams_render) return;
    if(p==none || inv_finfo==none || lightbeam==none || laserdpn==none || laserdot==none) return; // todo remove return
@@ -988,20 +1049,24 @@ function postrender(canvas c){
    c.setpos(hud_maptex_offset_x+region_area,hud_maptex_offset_y+region_area);
    c.drawtile(texture'scipixelblk', size_tex, size_tex, 0,0,4,4);
 //----- layer raytracer ------------------------------------------------------
-   sel_z = ena_lockz ? int(p.location.z - player_vs_dpn_addz) : int(presets_z[n_layerz]); // select scanned layer
+// sel_z = ena_lockz ? int(p.location.z - player_vs_dpn_addz) : int(presets_z[n_layerz]); // select scanned layer
    rc_tot = 0;
    pn_mz = 0;
-   foreach allactors(class'pathnoderuntime',pn){
+
+   process_map(false, c, p);
+   process_map(true,  c, p);
+
+/* foreach allactors(class'pathnoderuntime',dpn){
       pn_tot++;
 //----- layers ignorator ---------------------------------------
-      pnz = pn.location.z % LayerSensitivity; //VertDiscretization;  // eliminate z deviations to vert resolution
-      pnz = pn.location.z - pnz;
+      pnz = dpn.location.z % LayerSensitivity; //VertDiscretization;  // eliminate z deviations to vert resolution
+      pnz = dpn.location.z - pnz;
       nomatch_z = (abs(sel_z - pnz) > LayerSensitivity);   // now separate var, was compared to VertDiscr
       // todo why this behave other than diagz layers? respect vert_discr; rename it to floorheight
       if(mode_rayprocess==RP_SelFull && nomatch_z) continue; // we maybe still process further in fullcolor map mode
       if(!nomatch_z) pn_mz++;
 //----- dist ignorator ---------------------------------------
-      x = pn.location;   // cancer code: we use x y z vars for things not meaning coords
+      x = dpn.location;   // cancer code: we use x y z vars for things not meaning coords
       pnz = map_resolution * size_tex / 2;  // max map hull bounds for raytracing centers
       pnz += 540;                           // + bit more than trace length
       if(ena_2xzoom) pnz = pnz>>1;          // ignore 75% of area if 2x zooming
@@ -1013,14 +1078,14 @@ function postrender(canvas c){
       }  // in other modes, if PN/DPN far far outside of texture, try to eat less CPU
 //--------------------------------------------------------------
       r.yaw = 0;  r.roll = 0; r.pitch = 0; yaw_until = 65536.0;
-      if(pn.bDirectional){
-         r.yaw = pn.rotation.yaw - pn.mass/2;
-         yaw_until = pn.rotation.yaw + pn.mass;
+      if(dpn.bDirectional){
+         r.yaw = dpn.rotation.yaw - dpn.mass/2;
+         yaw_until = dpn.rotation.yaw + dpn.mass;
       }
       while(r.yaw<yaw_until){
          getaxes(r,x,y,z);
-         endtrace = pn.location + 768.0*x;   // scan dist
-         rtarg = trace(hl,hn,endtrace,pn.location,true);
+         endtrace = dpn.location + 768.0*x;   // scan dist
+         rtarg = trace(hl,hn,endtrace,dpn.location,true);
          hlx = (hl.x>>SHR_Factor_scanmap);
          hly = (hl.y>>SHR_Factor_scanmap);
          hlx += (size_tex>>1); hlx += (global_offset_x >> SHR_Factor_scanmap);
@@ -1047,18 +1112,19 @@ function postrender(canvas c){
              else                            c.drawcolor = pc_green_map;
          }
          bool_tmp = false;
-         if(pn.bDirectional) bool_tmp = true; // always render, no matter of hitloc.pitch
-         if(pn==laserdpn) /* { */
-            c.drawcolor = pc_pinker;          // nowspawning dpn scan result, pink
-//            bool_tmp = true;
-//         }
-//       if(abs(rotator(hn).pitch) <= anti_artifacts_maxslope){ // old code, delete me
+         if(dpn.bDirectional) bool_tmp = true; // always render, no matter of hitloc.pitch
+         if(dpn==laserdpn) c.drawcolor = pc_pinker; // nowspawning dpn scan result, pink
          if(bool_tmp || rotator(hn).pitch  <= anti_artifacts_maxslope){ // do strict walls if bool_tmp is false
             pnz = 0.25;               // safe to use pnz here
             if(ena_2xzoom) pnz = 0.5;
             if(ena_4xzoom) pnz = 1.0;
-            if(rtarg.group!='sciignore'){
-               if(pn==laserdpn && (mode_oper==MO_Mark || mode_oper==MO_Prod)) goto skip_by_drawmap_prod;
+            if(rtarg.group!='sciignore'){ // all ready to put pixel
+               if(mode_oper==MO_LifetimeCfg){            // dim all map if in lifetime cfg mode
+                  c.drawcolor.r = c.drawcolor.r>>2;
+                  c.drawcolor.g = c.drawcolor.g>>2;
+                  c.drawcolor.b = c.drawcolor.b>>2;
+               }
+               if(dpn==laserdpn && (mode_oper==MO_Mark || mode_oper==MO_Prod)) goto skip_by_drawmap_prod;
                c.setpos(hlx,hly);  c.drawicon(texture'scipixel',pnz);
              skip_by_drawmap_prod:
             }
@@ -1069,14 +1135,16 @@ function postrender(canvas c){
          if(mode_rayprocess==RP_AllFast) pnz = advance_ray_pos_fast;  // skip rays in mode 1, to 8x faster
          if(nomatch_z) pnz = advance_ray_pos_fast;                    // skip mismathing by z
          if(mode_rayprocess==RP_ClientLike                            // skip in mode 3
-            && vsizesq(pn.location - p.location)>max_fastscan_vsizesq) // outside max radius
+            && vsizesq(dpn.location - p.location)>max_fastscan_vsizesq) // outside max radius
                 pnz = advance_ray_pos_fast;
-         if(pn==laserdpn) pnz = advance_ray_pos_std;    // cancel skips for laser
+         if(dpn==laserdpn) pnz = advance_ray_pos_std;    // cancel skips for laser
          if(accumulated_pw_sens_fire>timetrigger_pw_sens_fire && !nomatch_z) pnz = advance_ray_pos_full; // override to full quality
+         if(mode_oper==MO_LifetimeCfg || false) pnz = advance_ray_pos_shit;
+          pnz = advance_ray_pos_shit; // debug
          r.yaw += pnz;  // apply
          rc_tot ++;     // rays counter
       }
-   }
+   } */
 //----- laser blast position -------------------------------------------------
    if(mode_laser != 0 && !ena_prod){
       // ------------------------------------------------
@@ -1158,6 +1226,33 @@ function postrender(canvas c){
       c.setpos(mkx-1+region_area, mky); c.drawtile(texture'scipixel', 1, region_area, 0,0,4,4); // t,r corner down
    }
  skip_by_drawregion_nomarkup:
+// ---- wasd marker for dpntest ----------------------------------------------
+   if(!ena_dpntest) goto skip_dpntest;
+   upx = hud_maptex_offset_x+fonw+fonw;
+   upy = hud_maptex_offset_y+fonw;
+   c.drawcolor = dpntest_dir&dtdir_w ? pc_yellow : pc_fill_bg;
+   c.setpos(upx,upy); c.drawtext("W");
+   upx = hud_maptex_offset_x+fonw+fonw+fonw+fonw+fonw;
+   upy = hud_maptex_offset_y+fonw;
+   c.drawcolor = dpntest_dir&dtdir_u ? pc_yellow : pc_fill_bg;
+   c.setpos(upx,upy); c.drawtext("up");
+   upx = hud_maptex_offset_x+fonw;
+   upy = hud_maptex_offset_y+fonw+fonh;
+   c.drawcolor = dpntest_dir&dtdir_a ? pc_yellow : pc_fill_bg;
+   c.setpos(upx,upy); c.drawtext("A");
+   upx = hud_maptex_offset_x+fonw+fonw;
+   upy = hud_maptex_offset_y+fonw+fonh;
+   c.drawcolor = dpntest_dir&dtdir_s ? pc_yellow : pc_fill_bg;
+   c.setpos(upx,upy); c.drawtext("S");
+   upx = hud_maptex_offset_x+fonw+fonw+fonw;
+   upy = hud_maptex_offset_y+fonw+fonh;
+   c.drawcolor = dpntest_dir&dtdir_d ? pc_yellow : pc_fill_bg;
+   c.setpos(upx,upy); c.drawtext("D");
+   upx = hud_maptex_offset_x+fonw+fonw+fonw+fonw+fonw;
+   upy = hud_maptex_offset_y+fonw+fonh;
+   c.drawcolor = dpntest_dir&dtdir_c ? pc_yellow : pc_fill_bg;
+   c.setpos(upx,upy); c.drawtext("dn");
+ skip_dpntest:
 // ---- texclip bg -----------------------------------------------------------
 // goto skip_maintex_border_clip; // uncomment this to allow region borders go outside main texture
    c.drawcolor = pc_bg;
@@ -1195,10 +1290,12 @@ function postrender(canvas c){
       c.setpos(x_view_rpos-(6*fonw), y_clientmsg+fonh); c.drawtext("Ignored");
    }
 // ---- banner ---------------------------------------------------------------
+   bool_tmp = (level.timeseconds-when_pickup)>15.0;
    c.drawcolor = pc_wh;
-   c.setpos(x_about,y_about);      c.drawtext("CT AMS 0.4 / Arleen / 2026-02-08");
+   str_tmp = bool_tmp ? "<F10> - pause" : "2026-02-08";
+   c.setpos(x_about,y_about); c.drawtext("CT AMS 0.4 / Arleen / "$str_tmp);
    c.drawcolor = pc_gray;
-   str_tmp = (level.timeseconds-when_pickup)>15.0 ? left(common_texname,33) : "System requirements: 1920x1080@32";
+   str_tmp = bool_tmp ? left(common_texname,33) : "System requirements: 1920x1080@32";
    c.setpos(x_about,y_about+fonh); c.drawtext(str_tmp);
 // ---- hotkeys, labels, modes -----------------------------------------------
    upx = x_hdr_oper; upy = y_hdr_oper;
@@ -1216,7 +1313,9 @@ function postrender(canvas c){
    upy = draw_key_action(c, pc_tmp, kw_f4, "<F4>", "markup", upx, upy);
    pc_tmp = mode_oper==MO_Prod ? pc_green : pc_green_f;
    upy = draw_key_action(c, pc_tmp, kw_f8, "<F8>", "prod",   upx, upy);
-   upy = draw_key_action(c, pc_red_f, kw_none, "<F10>", "pause", upx, upy);
+   pc_tmp = ena_dpntest ? pc_cyan : pc_green_f;
+   upy = draw_key_action(c, pc_tmp, kw_f3, "<F3>", "test",   upx, upy);
+// upy = draw_key_action(c, pc_red_f, kw_none, "<F10>", "pause", upx, upy);
    // -------------------
    if(mode_oper==MO_LifetimeCfg) goto skip_by_drawkeys_lifetimecfg;
    upx = x_hdr_map_ctl; upy = y_hdr_map_ctl;
@@ -1347,9 +1446,9 @@ function postrender(canvas c){
    c.setpos(upx,upy); c.drawtext("Mouse:");
      upx = x_col_mouse; upy += pad_fonh_half+fonh;
    pc_tmp = mode_oper!=MO_Prod ? pc_pink : pc_pink_f;
-   upy = draw_key_action(c, pc_tmp, !bDisableLRmouseNotify ? kw_lmb : kw_none, "<LB>", "open",  upx, upy);
+   upy = draw_key_action(c, pc_tmp, !bDisableLRmouseNotify ? kw_lmb : kw_none, "<LB>", "open/fqr",  upx, upy);
    upy = draw_key_action(c, pc_tmp,  bEnableMmouseNotify   ? kw_mmb : kw_none, "<MW>", "spawn", upx, upy);
-   upy = draw_key_action(c, pc_tmp, !bDisableLRmouseNotify ? kw_rmb : kw_none, "<RB>", "kill",  upx, upy);
+   upy = draw_key_action(c, pc_tmp, !bDisableLRmouseNotify ? kw_rmb : kw_none, "<RB>", "kill/spd",  upx, upy);
 // ---- warnings -------------------------------------------------------------
    upx = x_about; upy += fonh;
    if(mode_oper==MO_WantDiag){  // requested to enter diag mode
@@ -1402,7 +1501,7 @@ function postrender(canvas c){
       c.setpos(upx,upy); c.drawtext("   to leave this mode."); upy += fonh;
       upy = draw_key_action(c, pc_green, kw_ijkl, "<IK>", "select var",  upx, upy);
       upy = draw_key_action(c, pc_green, kw_ijkl, "<JL>", "change",  upx, upy);
-      upx = x_col_oper; upy = y_hdr_region;
+      upx = x_col_oper; upy = y_hdr_region+fonh+pad_fonh_half;
       c.drawcolor = pc_orange; c.setpos(upx,upy); c.drawtext("FloorDist:");
       upx = x_col_oper + (11*fonw);
       c.drawcolor = pc_wh; c.setpos(upx,upy); c.drawtext("autofall control. Presets:");
@@ -1610,6 +1709,126 @@ function postrender(canvas c){
    }
 }
 // ==================================================================================================
+function process_map(bool second_pass, canvas c, playerpawn p /*, int sel_z */){
+//   local color pc_tmp;  // tmp presetcolor
+//   local vector vect_tmp;
+   local int sel_z;
+   local bool bool_tmp;
+//   local float resolution_error;
+//   local int region_area;
+   local actor rtarg;
+   local vector x,y,z,endtrace,hl,hn;
+//   local string str_tmp;
+   local rotator r;
+//   local float rotr;  // radians rotation
+//   local byte nmarker;
+   local pathnoderuntime dpn;
+   local int hlx,hly; //,mkx,mky;
+//   local int marked_error;
+// local int pn_tot,pn_mz, /*pn_rad,*/ rc_tot; // pathnode total qty, matchz qty, radius, rays cast total
+//   local int i,j,k;
+//   local byte nframe;
+   local float pnz;
+   local bool nomatch_z; // this z does not match current sel_z or lock_z
+   local float yaw_until; // end of sector
+   sel_z = ena_lockz ? int(p.location.z - player_vs_dpn_addz) : int(presets_z[n_layerz]); // select scanned layer
+
+   foreach allactors(class'pathnoderuntime',dpn){
+      if(!second_pass) pn_tot++;
+//----- layers ignorator ---------------------------------------
+      pnz = dpn.location.z % LayerSensitivity; //VertDiscretization;  // eliminate z deviations to vert resolution
+      pnz = dpn.location.z - pnz;
+      nomatch_z = (abs(sel_z - pnz) > LayerSensitivity);   // now separate var, was compared to VertDiscr
+      // todo why this behave other than diagz layers? respect vert_discr; rename it to floorheight
+      if(!second_pass && !nomatch_z) continue;
+      if(second_pass && nomatch_z) continue;
+      if(mode_rayprocess==RP_SelFull && nomatch_z) continue; // we maybe still process further in fullcolor map mode
+      if(!nomatch_z) pn_mz++;
+//----- dist ignorator ---------------------------------------
+      x = dpn.location;   // cancer code: we use x y z vars for things not meaning coords
+      pnz = map_resolution * size_tex / 2;  // max map hull bounds for raytracing centers
+      pnz += 540;                           // + bit more than trace length
+      if(ena_2xzoom) pnz = pnz>>1;          // ignore 75% of area if 2x zooming
+      if(ena_4xzoom) pnz = pnz>>1;          // ignore 93% of area if 4x zooming
+     // pn_rad = pnz; // ???????? no idea for what it, mb remove ???????
+      if(mode_rayprocess!=RP_SelFull){ // always render all pathnodes in all_selected mode
+         if((abs(x.x + global_offset_x) > pnz)
+         || (abs(x.y + global_offset_y) > pnz)) continue;
+      }  // in other modes, if PN/DPN far far outside of texture, try to eat less CPU
+//--------------------------------------------------------------
+      r.yaw = 0;  r.roll = 0; r.pitch = 0; yaw_until = 65536.0;
+      if(dpn.bDirectional){
+         r.yaw = dpn.rotation.yaw - dpn.mass/2;
+         yaw_until = dpn.rotation.yaw + dpn.mass;
+      }
+      while(r.yaw<yaw_until){
+         getaxes(r,x,y,z);
+         endtrace = dpn.location + 768.0*x;   // scan dist
+         rtarg = trace(hl,hn,endtrace,dpn.location,true);
+         hlx = (hl.x>>SHR_Factor_scanmap);
+         hly = (hl.y>>SHR_Factor_scanmap);
+         hlx += (size_tex>>1); hlx += (global_offset_x >> SHR_Factor_scanmap);
+         hly += (size_tex>>1); hly += (global_offset_y >> SHR_Factor_scanmap);
+         if(ena_2xzoom){
+            hlx *= 2; hlx -= (size_tex>>1);
+            hly *= 2; hly -= (size_tex>>1);
+         }
+         if(ena_4xzoom){
+            hlx *= 2; hlx -= (size_tex>>1);
+            hly *= 2; hly -= (size_tex>>1);
+         }
+         hlx += hud_maptex_offset_x;
+         hly += hud_maptex_offset_y;
+         // -----------------------------------------
+         if( hlx<hud_maptex_offset_x          || hly<hud_maptex_offset_y          ||
+             hlx>hud_maptex_offset_x+size_tex || hly>hud_maptex_offset_y+size_tex  )
+             goto skip_by_drawmap_outtexbounds;
+         // -----------------------------------------
+         c.drawcolor = pc_wh;
+         if(mode_rayprocess==RP_ClientLike && nomatch_z){
+            if       (SHR_Factor_scanmap<=2) c.drawcolor = pc_blue_map;
+             else if (SHR_Factor_scanmap==3) c.drawcolor = pc_bluer_map;
+             else                            c.drawcolor = pc_green_map;
+         }
+         if(dpn.bIsKillGoal && ena_dpntest){
+            c.drawcolor = pc_red;
+            if(nomatch_z) c.drawcolor = pc_red_f;
+         }
+         bool_tmp = false;
+         if(dpn.bDirectional) bool_tmp = true; // always render, no matter of hitloc.pitch
+         if(dpn==laserdpn) c.drawcolor = pc_pinker; // nowspawning dpn scan result, pink
+         if(bool_tmp || rotator(hn).pitch  <= anti_artifacts_maxslope){ // do strict walls if bool_tmp is false
+            pnz = 0.25;               // safe to use pnz here
+            if(ena_2xzoom) pnz = 0.5;
+            if(ena_4xzoom) pnz = 1.0;
+            if(rtarg.group!='sciignore'){ // all ready to put pixel
+               if(mode_oper==MO_LifetimeCfg){            // dim all map if in lifetime cfg mode
+                  c.drawcolor.r = c.drawcolor.r>>2;
+                  c.drawcolor.g = c.drawcolor.g>>2;
+                  c.drawcolor.b = c.drawcolor.b>>2;
+               }
+               if(dpn==laserdpn && (mode_oper==MO_Mark || mode_oper==MO_Prod)) goto skip_by_drawmap_prod;
+               c.setpos(hlx,hly);  c.drawicon(texture'scipixel',pnz);
+             skip_by_drawmap_prod:
+            }
+         }
+       skip_by_drawmap_outtexbounds:
+         if(mode_rayprocess!=RP_SelFull) pnz = advance_ray_pos_std;   // assign rays density, full quality for mode 0 only
+          else pnz = advance_ray_pos_full;
+         if(mode_rayprocess==RP_AllFast) pnz = advance_ray_pos_fast;  // skip rays in mode 1, to 8x faster
+         if(nomatch_z) pnz = advance_ray_pos_fast;                    // skip mismathing by z
+         if(mode_rayprocess==RP_ClientLike                            // skip in mode 3
+            && vsizesq(dpn.location - p.location)>max_fastscan_vsizesq) // outside max radius
+                pnz = advance_ray_pos_fast;
+         if(dpn==laserdpn) pnz = advance_ray_pos_std;    // cancel skips for laser
+         if(accumulated_pw_sens_fire>timetrigger_pw_sens_fire && !nomatch_z) pnz = advance_ray_pos_full; // override to full quality
+         if(mode_oper==MO_LifetimeCfg || !second_pass) pnz = advance_ray_pos_shit;
+         r.yaw += pnz;  // apply
+         rc_tot ++;     // rays counter
+      }
+   }
+}
+// ==================================================================================================
 exec function mapinit(){
    local pathnode pn;
    if(mode_oper==MO_prod) return;
@@ -1724,6 +1943,7 @@ function playselect(){
    p.consolecommand("set input f7 tog_opermode 1");
    p.consolecommand("set input f4 tog_opermode 2");
    p.consolecommand("set input f8 tog_opermode 3");
+   p.consolecommand("set input f3 tog_dpntest");
    p.consolecommand("set input f10 ams_pause");            // opermode ends
    p.consolecommand("set input z tog_digzoom");
    p.consolecommand("set input x tog_shr_factor");
@@ -2193,6 +2413,145 @@ exec function new_layerz_manual(){
    ena_next_dpn_zset = !ena_next_dpn_zset;
 }
 
+
+// =====================================================================
+// Доспавнивает PathNode-акторы в закрытых помещениях, чтобы улучшить
+// покрытие стен при runtime-сканировании (PathNode = центр рейтрейса).
+//
+// Правила:
+//   * MIN_DIST      = 96   — ближе ставить бессмысленно
+//   * PREF_DIST     = 384  — типичная дистанция от стены
+//   * MAX_WALL_DIST = 512  — дальше считается открытым пространством
+//   * MAX_CHILDREN  = 3    — максимум детей на одного родителя
+//   * MAX_TOTAL     = 4500 — глобальный потолок числа PathNode
+//
+// Запускать из мутатора/консольной команды с серверным авторитетом.
+// =====================================================================
+
+
+
+// ---------------------------------------------------------------------
+// Точка входа. Вызывать: SpawnCoverage(Level)
+// ---------------------------------------------------------------------
+exec function spawndpn(){
+    local array<PathNode> Sources;
+    local PathNode PN;
+    local int i, Existing;
+//  foreach AllActors(class'PathNode', PN) Sources[Sources.Length] = PN;
+    foreach AllActors(class'PathNode', PN) Sources.add(PN);
+    Existing = Sources.size();
+    if (Existing >= MAX_TOTAL) return;
+    for (i = 0; i < Sources.size(); i++){
+        PN = Sources[i];
+        if (PN == None) continue;
+        ProcessSource(PN);
+        if (Existing + SpawnedTotal >= MAX_TOTAL) break;
+    }
+    log("PathNodeCoverageSpawner: added" @ SpawnedTotal @
+        "nodes (" @ Existing @ " -> " @ Existing + SpawnedTotal @
+        "), skipped-open=" @ SkippedOpen);
+}
+
+// ---------------------------------------------------------------------
+// Обработка одного исходного узла
+// ---------------------------------------------------------------------
+function ProcessSource(PathNode Parent){
+    local int   r, Children;
+    local float Angle, Step;
+    local vector Dir, Hit, Cand;
+    local array<vector> Hits;
+    local array<bool>   bWall;
+    local bool bAnyWall;
+
+    Step = 6.2831853 / NUM_RAYS;
+    bAnyWall = false;
+
+    // 1) веер лучей по горизонтали
+    for (r = 0; r < NUM_RAYS; r++){
+        Angle = Step * r;
+        Dir.X = Cos(Angle);
+        Dir.Y = Sin(Angle);
+        Dir.Z = 0.0;
+        if (CastToWall(Parent.Location, Dir, MAX_WALL_DIST, Hit)){
+//          Hits[Hits.Length]   = Hit;
+            Hits.Add(Hit);
+//          bWall[bWall.Length] = true;
+            bWall.Add(true);
+            bAnyWall = true;
+        }else{
+            // стены нет в пределах 512 — открытая зона
+//          Hits[Hits.Length]   = Parent.Location + Dir * MAX_WALL_DIST;
+            Hits.Add(Parent.Location + Dir * MAX_WALL_DIST);
+//          bWall[bWall.Length] = false;
+            bWall.Add(false);
+        }
+    }
+    if (!bAnyWall){      // no wallhits
+        SkippedOpen++;
+        return;
+    }
+    Children = 0;
+
+    // 2) приоритет — углы. Соседние лучи бьют в стены => рядом стык.
+    for (r = 0; r < NUM_RAYS && Children < MAX_CHILDREN; r++){
+        if (!bWall[r]) continue;
+        if (!(bWall[(r + 1) % NUM_RAYS] || bWall[(r + NUM_RAYS - 1) % NUM_RAYS])) continue;
+        // кандидат: отступаем от стены к родителю
+        Cand = Hits[r] + Normal(Parent.Location - Hits[r]) * CHILD_BACKOFF;
+        if (TrySpawnChild(Parent, Cand)) Children++;
+    }
+
+    // 3) одиночные стены. Родитель далеко от стены — подсаживаем ребёнка.
+    for (r = 0; r < NUM_RAYS && Children < MAX_CHILDREN; r += 2) {
+        if (!bWall[r]) continue;
+        // уже почти у стены — не трогаем
+        if (VSize(Hits[r] - Parent.Location) <= PREF_DIST + 32.0) continue;
+        Cand = Hits[r] + Normal(Parent.Location - Hits[r]) * PREF_DIST;
+        if (TrySpawnChild(Parent, Cand)) Children++;
+    }
+}
+
+// ---------------------------------------------------------------------
+// Рейтрейс до стены. true — если попали в вертикальную поверхность.
+// ---------------------------------------------------------------------
+function bool CastToWall(vector From, vector Dir, float MaxDist, out vector HitLoc){
+    local vector Start, End, HitNorm;
+    Start = From + vect(0, 0, 24);   // 24=floordist
+    End   = Start + Dir * MaxDist;
+    if (Trace(HitLoc, HitNorm, End, Start, true) != None){
+        if (Abs(HitNorm.Z) < 0.7 && VSize(HitLoc - From) > 32.0) return true;
+    }
+    return false;
+}
+
+function bool TrySpawnChild(PathNode Parent, vector Cand){
+    local PathNode PN;
+    local pathnoderuntime dpn;
+    local vector HitLoc, HitNorm, Ground;
+    local Actor A;
+
+    // не в стене
+    A = Trace(HitLoc, HitNorm, Cand, Cand, true);
+    if (A != None) return false;
+
+    // не ближе MIN_DIST ни к одному существующему PathNode
+    foreach AllActors(class'PathNode', PN){
+        if (PN == Parent) continue;
+        if (VSize(PN.Location - Cand) < MIN_DIST) return false;
+    }
+
+    // прижать к полу
+    if (Trace(Ground, HitNorm, Cand - vect(0, 0, 512), Cand, true) == None) return false;
+    Cand = Ground + vect(0, 0, 24); //floordist
+    // ещё раз проверим, что не в стене после прижатия
+    A = Trace(HitLoc, HitNorm, Cand, Cand, true);
+    if (A != None) return false;
+    dpn = Spawn(class'pathnoderuntime',,, Cand, rot(0, 0, 0));
+    if (dpn == None) return false;
+    SpawnedTotal++;
+    return true;
+}
+
 defaultproperties{
   laserdpn=None
   laserdot=None
@@ -2233,6 +2592,7 @@ defaultproperties{
   mode_oper=MO_Scan
   mode_confirm=MC_Reset
   ena_debug=false
+  ena_dpntest=false
   mode_mwheel=MW_modL
   mode_step=2
   mode_texsize=2

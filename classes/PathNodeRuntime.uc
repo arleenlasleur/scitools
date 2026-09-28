@@ -36,7 +36,7 @@ defaultproperties{
    bDirectional=false   // used as anywall flag (anti-artifact behavior disabled)
    bIsSecretGoal=false  // used as delayed appear flag; handle timer in external class
    Mass=100.0           // used as anywall sector
-// bIsKillGoal;
+   bIsKillGoal=false    // used as untested marker, all untouched dpns are red
 // bIsItemGoal;
 // bEdLocked;
 // bEdShouldSnap;
