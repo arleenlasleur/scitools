@@ -23,7 +23,7 @@ $outputFile = fopen($outputPath, "w");
 if(!$outputFile) die("Output file inaccessible.".PHP_EOL);
 
 // phase 1: t3d header
-fwrite($outputFile, "Begin Map.PHP_EOL");
+fwrite($outputFile, "Begin Map".PHP_EOL);
 fwrite($outputFile, "Begin Actor Class=Brush Name=VertexMesh1".PHP_EOL);
 fwrite($outputFile, "    CsgOper=CSG_Active".PHP_EOL);
 fwrite($outputFile, "    Begin Brush Name=Brush".PHP_EOL);
@@ -61,7 +61,7 @@ for($i = 0; $i<$vCount; $i++){
           $p1 = $vertices[$idx1];
           $p2 = $vertices[$idx2];
           $p3 = $vertices[$idx3];
-          fwrite($outputFile, "            Begin Polygon Texture=DefaultFlags Flags=0".PHP_EOL);
+          fwrite($outputFile, "            Begin Polygon Texture=Default Flags=0".PHP_EOL);
           fwrite($outputFile, "                Origin   " . sprintf("%+013.6f,%+013.6f,%+013.6f", $p1['x'], $p1['y'], $p1['z']) .PHP_EOL);
           fwrite($outputFile, "                Normal   +00000.000000,+00000.000000,+00001.000000".PHP_EOL);
           fwrite($outputFile, "                TextureU +00001.000000,+00000.000000,+00000.000000".PHP_EOL);

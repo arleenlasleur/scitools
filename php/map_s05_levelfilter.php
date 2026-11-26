@@ -2,7 +2,7 @@
 // pass 1
 if('cli'!==PHP_SAPI) return;
 if(!isset($argv[2])){
-   echo "Call: t3d_level_simplifier <infile.t3d> <SearchTexture>".PHP_EOL;
+   echo "Call: levelfilter.php <infile.t3d> <SearchTexture> [SearchSecondary]".PHP_EOL;
    echo "Output to infile_s.t3d".PHP_EOL;
    return;
 }
@@ -11,7 +11,8 @@ $swap = "brush.tmp";
 $fni = strtolower($argv[1]);
 $fpi=file($fni,FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 $filter = $argv[2];
-$fpo_result  =  fopen(str_replace(".t3d","_s.t3d",$fni),"w");
+if(isset($argv[3])) $filter_sec = $argv[3];
+$fpo_result  =  fopen(str_replace(".t3d","_l.t3d",$fni),"w");
 
 $brush_started = false;
 $poly_found    = false;
@@ -21,7 +22,7 @@ $n_done  = 0;
 echo "Working... processing actor: ";
 
 foreach ($fpi as $line){
-   $line = str_replace(chr(0x09),"        ",$line); // replace tabs by spaces
+   $line = str_replace(chr(0x09)," ",$line); // replace tabs by spaces
    if(stripos($line,"Begin Actor") !== false){
       $brush_started  = true;
       $n_actor++;
@@ -30,6 +31,7 @@ foreach ($fpi as $line){
    if($brush_started){
       fwrite($fpo_exam_brush,$line.PHP_EOL);
       if(stripos($line,$filter) !== false) $poly_found = true;
+      if(stripos($line,$filter_sec) !== false) $poly_found = true;
    }
    if(stripos($line,"End Actor") !== false){
       $brush_started = false;
